@@ -1,0 +1,174 @@
+---
+- name: Grafana User and Dashboard Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    grafana_url: "{{ lookup('ansible.builtin.env', 'GRAFANA_URL') }}"
+    grafana_username: "{{ lookup('ansible.builtin.env', 'GRAFANA_USERNAME') }}"
+    grafana_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_PASSWORD') }}"
+    influxdb_admin_token: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ADMIN_TOKEN') }}"
+
+  vars_prompt:
+    - name: user_name
+      prompt: "Enter the user name"
+      private: false
+
+    - name: user_email
+      prompt: "Enter the user email address"
+      private: false
+
+    - name: company_name
+      prompt: "Enter the company name"
+      private: false
+
+    - name: campaign_name
+      prompt: "Enter the campaign name"
+      private: false
+
+  tasks:
+    - name: Validate required environment variables
+      ansible.builtin.assert:
+        that:
+          - grafana_url | length > 0
+          - grafana_username | length > 0
+          - grafana_password | length > 0
+          - influxdb_admin_token | length > 0
+          - campaign_name | length > 0
+        fail_msg: "Required environment variables are not set. Please check your .env file."
+
+    - name: Generate random password for new user
+      ansible.builtin.set_fact:
+        generated_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits,punctuation') }}"
+      no_log: true
+
+    - name: Create Grafana user
+      community.grafana.grafana_user:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ user_name }}"
+        email: "{{ user_email }}"
+        login: "{{ user_name }}"
+        password: "{{ generated_password }}"
+        is_admin: false
+        state: present
+        validate_certs: false
+      register: created_user
+
+    - name: Create Grafana team
+      community.grafana.grafana_team:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ company_name }}"
+        email: "{{ user_email }}"
+        members:
+          - "{{ user_email }}"
+        state: present
+        validate_certs: false
+      register: created_team
+
+    - name: Create Grafana folder for team
+      community.grafana.grafana_folder:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        title: "{{ company_name }}"
+        state: present
+        validate_certs: false
+      register: created_folder
+
+    - name: Create InfluxDB datasource
+      community.grafana.grafana_datasource:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "influxdb_{{ company_name }}"
+        ds_type: influxdb
+        ds_url: "http://influxdb:8181"
+        database: "{{ company_name }}"
+        additional_json_data:
+          version: "SQL"
+          dbName: "{{company_name}}"
+          insecureGrpc: true
+        additional_secure_json_data:
+          token: "{{ influxdb_admin_token }}"
+        state: present
+        validate_certs: false
+      register: created_datasource
+
+    - name: Template dashboard JSON file
+      ansible.builtin.template:
+        src: ../templates/dashboard.json.j2
+        dest: /tmp/dashboard_{{ company_name }}.json
+        mode: '0644'
+      vars:
+        datasource_uid: "{{ created_datasource.datasource.uid }}"
+        datasource_name: "influxdb_{{ company_name }}"
+        dashboard_campaign_name: "{{ campaign_name }}"
+
+    - name: Import dashboard from templated JSON
+      community.grafana.grafana_dashboard:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        state: present
+        path: "{{ json_file }}"
+        folder: "{{ company_name }}"
+        overwrite: true
+        validate_certs: false
+      register: imported_dashboard
+
+    - name: Set dashboard permissions for team (viewer role)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/dashboards/uid/{{imported_dashboard.uid}}/permissions"
+        method: POST
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          items:
+            - teamId: "{{ created_team.team.id }}"
+              permission: 1
+        status_code: 200
+        validate_certs: false
+
+    - name: Set folder permissions for team
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/folders/{{ created_folder.folder.uid }}/permissions"
+        method: POST
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          items:
+            - teamId: "{{ created_team.team.id }}"
+              permission: 1
+        status_code: 200
+        validate_certs: false
+
+    - name: Clean up temporary dashboard file
+      ansible.builtin.file:
+        path: "/tmp/dashboard_{{ company_name }}.json"
+        state: absent
+
+    - name: Display user credentials
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Grafana Resources Created Successfully!"
+          - "============================================"
+          - "User: {{ user_name }}"
+          - "Email: {{ user_email }}"
+          - "Password: {{ generated_password }}"
+          - "Team: {{ company_name }}"
+          - "Datasource: influxdb_{{ company_name }}"
+          - "Dashboard: {{ company_name }}"
+          - "Folder: {{ company_name }}"
+          - "============================================"
+          - "IMPORTANT: Save this password securely!"
+          - "============================================"

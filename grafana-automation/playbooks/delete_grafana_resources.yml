@@ -1,0 +1,142 @@
+---
+- name: Delete Grafana User and Associated Resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    grafana_url: "{{ lookup('env', 'GRAFANA_URL') }}"
+    grafana_username: "{{ lookup('env', 'GRAFANA_USERNAME') }}"
+    grafana_password: "{{ lookup('env', 'GRAFANA_PASSWORD') }}"
+
+  vars_prompt:
+    - name: user_name
+      prompt: "Enter the user name to delete"
+      private: false
+
+    - name: company_name
+      prompt: "Enter the company name to delete"
+      private: false
+
+    - name: confirm_delete
+      prompt: "Are you sure you want to delete user '{{ user_name | default(omit)}}' and team '{{ company_name | default(omit) }}'? (yes/no)"
+      private: false
+      default: "no"
+
+  tasks:
+    - name: Abort if not confirmed
+      ansible.builtin.fail:
+        msg: "Deletion cancelled by user"
+      when: confirm_delete != "yes"
+
+    - name: Get user ID
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_name }}"
+        method: GET
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: [200, 404]
+        validate_certs: false
+      register: user_info
+
+    - name: Get team ID
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams/search?name={{ company_name }}"
+        method: GET
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: [200, 404]
+        validate_certs: false
+      register: team_info
+
+    - name: Get folder information
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/folders"
+        method: GET
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: 200
+        validate_certs: false
+      register: folders_list
+
+    - name: Extract folder UID
+      ansible.builtin.set_fact:
+        folder_uid: "{{ folders_list.json | selectattr('title', 'equalto', company_name) | map(attribute='uid') | first | default('') }}"
+
+    - name: Delete dashboards in folder
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/search?folderIds={{ folders_list.json | selectattr('title', 'equalto', company_name) | map(attribute='id') | first }}&type=dash-db"
+        method: GET
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: dashboards_in_folder
+      when: folder_uid | length > 0
+
+    - name: Remove each dashboard
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/dashboards/uid/{{ item.uid }}"
+        method: DELETE
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: [200, 404]
+        validate_certs: false
+      loop: "{{ dashboards_in_folder.json | default([]) }}"
+      when: folder_uid | length > 0
+
+    - name: Delete Grafana folder
+      community.grafana.grafana_folder:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        title: "{{ company_name }}"
+        state: absent
+        validate_certs: false
+      when: folder_uid | length > 0
+
+    - name: Delete InfluxDB datasource
+      community.grafana.grafana_datasource:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "influxdb_{{ company_name }}"
+        state: absent
+        validate_certs: false
+
+    - name: Delete Grafana team
+      community.grafana.grafana_team:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ company_name }}"
+        email: "{{ user_info.json.email }}"
+        state: absent
+        validate_certs: false
+      when: team_info.json.teams is defined and team_info.json.teams | length > 0
+
+    - name: Delete Grafana user
+      community.grafana.grafana_user:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        login: "{{ user_name }}"
+        state: absent
+        validate_certs: false
+      when: user_info.status == 200
+
+    - name: Display deletion summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Grafana Resources Deleted Successfully!"
+          - "============================================"
+          - "User: {{ user_name }}"
+          - "Team: {{ company_name }}"
+          - "Datasource: influxdb_{{ company_name }}"
+          - "Folder and Dashboards: {{ company_name }}"
+          - "============================================"

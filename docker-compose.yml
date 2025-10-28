@@ -1,0 +1,63 @@
+version: "3.8"
+services:
+  influxdb:
+    image: influxdb:3-core
+    container_name: influxdb
+    restart: always
+    hostname: influxdb
+    ports:
+      - 8181:8181
+    command:
+      - influxdb3
+      - serve
+      - --node-id=node0
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3/data
+      - --plugin-dir=/var/lib/influxdb3/plugins
+    volumes:
+      - influxdb3-data:/var/lib/influxdb3/data
+      - influxdb3-plugins:/var/lib/influxdb3/plugins
+
+  grafana:
+    image: grafana/grafana-enterprise
+    user: "1000"
+    depends_on:
+      - influxdb
+    container_name: grafana
+    restart: always
+    ports:
+      - 8088:3000
+    environment:
+      INFLUXDB_DATA_INDEX_VERSION: "tsi1"
+      GF_INSTALL_PLUGINS: "grafana-clock-panel,\
+                          grafana-influxdb-08-datasource,\
+                          grafana-kairosdb-datasource,\
+                          grafana-piechart-panel,\
+                          volkovlabs-form-panel, \
+                          grafana-simple-json-datasource"
+      GF_SECURITY_ADMIN_PASSWORD: $GRAFANA_PASSWORD
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  explorer:
+    image: influxdata/influxdb3-ui:1.3.0
+    container_name: influxdb3-explorer
+    pull_policy: always
+    command: ["--mode=query"]
+    ports:
+      - "8888:80"
+    depends_on:
+      - influxdb
+    volumes:
+      - influxdb3-explorer-db:/db:rw
+      - ./influxdb3-explorer-ssl:/etc/nginx/ssl:ro
+    environment:
+      DATABASE_URL: '/db/sqlite.db'
+      SESSION_SECRET_KEY: $SESSION_SECRET_KEY
+    restart: unless-stopped
+
+volumes:
+  influxdb3-data:
+  influxdb3-plugins:
+  grafana-data:
+  influxdb3-explorer-db:
