@@ -80,12 +80,12 @@ python3 -m venv ~/envs/powerview
 
 Enable the virtual env
 ```
-source ~/envs/powerview/bin/activate
+    source ~/envs/powerview/bin/activate
 ```
 
 Install python dependencies
 ```
-pip install influxdb3-python pandas dotenv
+pip install -r requirements.txt
 ```
 
 ### Verify your data structure
@@ -116,13 +116,6 @@ data -> client_name -> campaign_name -> device_serial_number : \*.tsv files
 
 ```
 python3 tsv_parser.py data/
-```
-
-## Install ansible for Grafana automation
-
-```
-source ~/envs/powerview/bin/activate
-python3 -m pip install ansible
 ```
 
 ## Create a Grafana dashboard for a campaign
