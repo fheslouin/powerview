@@ -11,6 +11,7 @@ This Ansible playbook automates Grafana user management, team creation, datasour
 - ✅ Imports and templates dashboards dynamically
 - ✅ Sets proper permissions (team as viewer)
 - ✅ Supports resource deletion
+
 ## Prerequisites
 
 - Ansible Core 2.19 / Ansible 12
@@ -29,13 +30,13 @@ ansible-galaxy collection install -r requirements.yml
 
 ## Usage
 
-### Create Resources
+### Create user, team and Grafana dashboard
 
 Source environment variables
 
 ```
 export $(cat ../.env)
-source ~/envs/powervue/bin/activate
+source ~/envs/powerview/bin/activate
 ```
 
 Run the playbook
@@ -52,13 +53,13 @@ You will be prompted for:
 
 The password will be automatically generated and displayed at the end.
 
-### Delete Resources
+### Delete user, team and Grafana dashboard
 
 Source environment variables
 
 ```
 export $(cat ../.env)
-source ~/envs/powervue/bin/activate
+source ~/envs/powerview/bin/activate
 ```
 
 Run the deletion playbook

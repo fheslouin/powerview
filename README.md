@@ -1,4 +1,4 @@
-# PowerVue
+# powerview
 
 ## Podman setup (Docker alternative)
 
@@ -75,12 +75,12 @@ sudo apt install python3.13-venv rename
 
 Create a virtual env
 ```
-python3 -m venv ~/envs/powervue
+python3 -m venv ~/envs/powerview
 ```
 
 Enable the virtual env
 ```
-source ~/envs/powervue/bin/activate
+source ~/envs/powerview/bin/activate
 ```
 
 Install python dependencies
@@ -121,7 +121,7 @@ python3 tsv_parser.py data/
 ## Install ansible for Grafana automation
 
 ```
-source ~/envs/powervue/bin/activate
+source ~/envs/powerview/bin/activate
 python3 -m pip install ansible
 ```
 
