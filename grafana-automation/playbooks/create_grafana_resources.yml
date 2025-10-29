@@ -10,6 +10,9 @@
     grafana_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_PASSWORD') }}"
     influxdb_admin_token: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ADMIN_TOKEN') }}"
 
+    json_file: "/tmp/dashboard_master.json"
+    exported_dashboard_json_file: "/tmp/dashboard_exported.json"
+
   vars_prompt:
     - name: user_name
       prompt: "Enter the user name"
@@ -99,15 +102,22 @@
         validate_certs: false
       register: created_datasource
 
-    - name: Template dashboard JSON file
-      ansible.builtin.template:
-        src: ../templates/dashboard.json.j2
-        dest: /tmp/dashboard_{{ company_name }}.json
-        mode: '0644'
-      vars:
-        datasource_uid: "{{ created_datasource.datasource.uid }}"
-        datasource_name: "influxdb_{{ company_name }}"
-        dashboard_campaign_name: "{{ campaign_name }}"
+    - name: Export master dashboard as JSON file
+      community.grafana.grafana_dashboard:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        state: export
+        path: "{{ exported_dashboard_json_file}}"
+        uid: "adq2j6z"
+        validate_certs: false
+      register: exported_dashboard
+
+    - name: Modify Grafana dashboard JSON
+      ansible.builtin.shell: |
+        jq 'del(.dashboard.version) | del(.dashboard.id) | del(.dashboard.uid) | del(.meta) | .dashboard.title = "{{ campaign_name }}" | (..|objects|select(.type=="influxdb" and has("uid"))|.uid) = "{{ created_datasource.datasource.uid }}"' "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
+      args:
+        executable: /bin/bash
 
     - name: Import dashboard from templated JSON
       community.grafana.grafana_dashboard:
@@ -117,6 +127,7 @@
         state: present
         path: "{{ json_file }}"
         folder: "{{ company_name }}"
+        uid: '{{ lookup("pipe", "uuidgen") }}'
         overwrite: true
         validate_certs: false
       register: imported_dashboard
