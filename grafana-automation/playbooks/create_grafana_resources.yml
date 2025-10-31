@@ -10,68 +10,30 @@
     grafana_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_PASSWORD') }}"
     influxdb_admin_token: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ADMIN_TOKEN') }}"
 
-    json_file: "/tmp/dashboard_master.json"
-    exported_dashboard_json_file: "/tmp/dashboard_exported.json"
-
-  vars_prompt:
-    - name: user_name
-      prompt: "Enter the user name"
-      private: false
-
-    - name: user_email
-      prompt: "Enter the user email address"
-      private: false
-
-    - name: company_name
-      prompt: "Enter the company name"
-      private: false
-
-    - name: campaign_name
-      prompt: "Enter the campaign name"
-      private: false
+    json_file: "/srv/powerview/dashboard_master.json"
+    exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
+    data_path: "/srv/sftpgo/data"
 
   tasks:
-    - name: Validate required environment variables
-      ansible.builtin.assert:
-        that:
-          - grafana_url | length > 0
-          - grafana_username | length > 0
-          - grafana_password | length > 0
-          - influxdb_admin_token | length > 0
-          - campaign_name | length > 0
-        fail_msg: "Required environment variables are not set. Please check your .env file."
+    - name: Check if dashboard created file exists
+      stat:
+        path: "{{ data_path }}/{{ company_name }}/{{campaign_name}}/.dashboard.created"
+      register: dashboard_created
 
-    - name: Generate random password for new user
-      ansible.builtin.set_fact:
-        generated_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits,punctuation') }}"
-      no_log: true
-
-    - name: Create Grafana user
-      community.grafana.grafana_user:
-        url: "{{ grafana_url }}"
+    - name: Create Grafana Team
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams"
+        method: POST
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
-        name: "{{ user_name }}"
-        email: "{{ user_email }}"
-        login: "{{ user_name }}"
-        password: "{{ generated_password }}"
-        is_admin: false
-        state: present
-        validate_certs: false
-      register: created_user
-
-    - name: Create Grafana team
-      community.grafana.grafana_team:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        name: "{{ company_name }}"
-        email: "{{ user_email }}"
-        members:
-          - "{{ user_email }}"
-        state: present
+        force_basic_auth: true
+        body_format: json
+        body:
+          name: "{{ company_name }}"
+        status_code: [200, 409]
         validate_certs: false
       register: created_team
+      when: not dashboard_created.stat.exists
 
     - name: Create Grafana folder for team
       community.grafana.grafana_folder:
@@ -82,6 +44,8 @@
         state: present
         validate_certs: false
       register: created_folder
+      when: not created_team.status | default(omit)== 409
+        and not dashboard_created.stat.exists
 
     - name: Create InfluxDB datasource
       community.grafana.grafana_datasource:
@@ -112,12 +76,14 @@
         uid: "adq2j6z"
         validate_certs: false
       register: exported_dashboard
+      when: not dashboard_created.stat.exists
 
     - name: Modify Grafana dashboard JSON
       ansible.builtin.shell: |
         jq 'del(.dashboard.version) | del(.dashboard.id) | del(.dashboard.uid) | del(.meta) | .dashboard.title = "{{ campaign_name }}" | (..|objects|select(.type=="influxdb" and has("uid"))|.uid) = "{{ created_datasource.datasource.uid }}"' "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
       args:
         executable: /bin/bash
+      when: not dashboard_created.stat.exists
 
     - name: Import dashboard from templated JSON
       community.grafana.grafana_dashboard:
@@ -131,6 +97,7 @@
         overwrite: true
         validate_certs: false
       register: imported_dashboard
+      when: not dashboard_created.stat.exists
 
     - name: Set dashboard permissions for team (viewer role)
       ansible.builtin.uri:
@@ -142,10 +109,12 @@
         body_format: json
         body:
           items:
-            - teamId: "{{ created_team.team.id }}"
+            - teamId: "{{ created_team.json.teamId }}"
               permission: 1
         status_code: 200
         validate_certs: false
+      when: not created_team.status | default(omit)== 409
+        and not dashboard_created.stat.exists
 
     - name: Set folder permissions for team
       ansible.builtin.uri:
@@ -157,15 +126,27 @@
         body_format: json
         body:
           items:
-            - teamId: "{{ created_team.team.id }}"
+            - teamId: "{{ created_team.json.teamId }}"
               permission: 1
         status_code: 200
         validate_certs: false
+      when: not created_team.status | default(omit) == 409
+        and not dashboard_created.stat.exists
 
     - name: Clean up temporary dashboard file
       ansible.builtin.file:
-        path: "/tmp/dashboard_{{ company_name }}.json"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ json_file }}"
+        - "{{ exported_dashboard_json_file }}"
+      when: not dashboard_created.stat.exists
+
+    - name: Touch a file -> Dashboard created
+      ansible.builtin.file:
+        path: "{{ data_path }}/{{ company_name }}/{{campaign_name}}/.dashboard.created"
+        state: touch
+      when: not dashboard_created.stat.exists
 
     - name: Display user credentials
       ansible.builtin.debug:
@@ -173,13 +154,7 @@
           - "============================================"
           - "Grafana Resources Created Successfully!"
           - "============================================"
-          - "User: {{ user_name }}"
-          - "Email: {{ user_email }}"
-          - "Password: {{ generated_password }}"
           - "Team: {{ company_name }}"
           - "Datasource: influxdb_{{ company_name }}"
           - "Dashboard: {{ company_name }}"
           - "Folder: {{ company_name }}"
-          - "============================================"
-          - "IMPORTANT: Save this password securely!"
-          - "============================================"
