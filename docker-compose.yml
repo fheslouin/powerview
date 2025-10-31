@@ -9,9 +9,17 @@ services:
       - 8181:8181
     command:
       - influxdb3
+      - --num-io-threads=2
       - serve
       - --node-id=node0
       - --object-store=file
+      - --exec-mem-pool-bytes=10GB
+      - --parquet-mem-cache-size=500
+      - --parquet-mem-cache-size=2147483648
+      - --force-snapshot-mem-threshold=80%
+      - --wal-flush-interval=10s
+      - --wal-snapshot-size=100MB
+      - --gen1-duration 10m
       - --data-dir=/var/lib/influxdb3/data
       - --plugin-dir=/var/lib/influxdb3/plugins
     volumes:
