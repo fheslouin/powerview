@@ -6,6 +6,7 @@ Recursively parses TSV files and loads data into InfluxDB database
 
 import os
 import sys
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Tuple
@@ -290,18 +291,31 @@ def main():
     print("TSV to InfluxDB 3 Core Parser")
     print("=" * 70)
 
-    # Get base folder from user
-    if len(sys.argv) > 1:
-        base_folder = sys.argv[1]
-    else:
-        base_folder = input("Enter the base folder path containing TSV files: ").strip()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-d", "--dataFolder", help="Path to the data folder (ex: /srv/powerview/data)")
+    parser.add_argument("-t", "--tsvFile", help="Path to the TSV file(s)")
+    args = parser.parse_args()
 
-    if not os.path.exists(base_folder):
-        print(f"Error: Folder '{base_folder}' does not exist.")
-        sys.exit(1)
+    # Get TSV file from command line arguments or find all TSV files
+    if args.tsvFile and args.dataFolder:
+        base_folder = args.dataFolder
+        if not os.path.exists(base_folder):
+            print(f"Error: Folder '{base_folder}' does not exist.")
+            sys.exit(1)
+        else:
+            print(f"Using data folder: {base_folder}")
 
-    # Find all TSV files
-    tsv_files = find_tsv_files(base_folder)
+        tsv_files = [args.tsvFile]
+        print(f"Using specified TSV files: {tsv_files}")
+
+    elif args.dataFolder and not args.tsvFile:
+        base_folder = args.dataFolder
+        if not os.path.exists(base_folder):
+            print(f"Error: Folder '{base_folder}' does not exist.")
+            sys.exit(1)
+        else:
+            print(f"Using all TSV files in folder: {base_folder}")
+            tsv_files = find_tsv_files(base_folder)
 
     if not tsv_files:
         print("No TSV files found to process.")
