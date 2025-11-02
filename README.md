@@ -55,38 +55,14 @@ Copy the file to create a new one and fill it up with your own information
 cp .env.sample .env
 ```
 
-Generate random session secret key
-
-```shell
-openssl rand -hex 32
-```
-
-* Set `SESSION_SECRET_KEY` var with the result
 * Set a `GRAFANA_PASSWORD`
-* Set `INFLUXDB_ADMIN_TOKEN` with InfluxDB 3 admin token
+* Set `INFLUXDB_ADMIN_TOKEN` you can retrieve it from the influxdb web interface
 
 ### Start Grafana and InfluxDB
 
 ```shell
 podman compose up -d
 ```
-
-In production setup, prefer to launch only influxdb and grafana and choose to not start influxdb explorer
-
-```shell
-podman compose up grafana influxdb
-```
-
-### Generate an influxdb3 admin token
-
-Then generate an admin token
-
-```shell
-podman exec -ti influxdb influxdb3 create token --admin
-```
-
-Paste the given token in `INFLUXDB_ADMIN_TOKEN` env var in the `.env` file
-
 
 ### Install SFTPGo server
 
@@ -193,3 +169,37 @@ SFTPGo creates event that are catch each time a file is uploaded or a directory 
   * Set permissions on the dashboard and the team folder for the created Team
 
 Once done, you'll be able to see a new Dashboard created in Grafana based on data imported by the python parser.
+
+## Divers
+
+### Grafana Flux query
+
+To get all channels as a dashboard variables
+
+```flux
+from(bucket: "enercoop")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "tertiaire")
+  |> filter(fn: (r) => r.unit == "W")
+  |> map(fn: (r) => ({
+      _field: "SN: " + string(v: r.device) + " - Ch: " + string(v: r.channel_name)
+  }))
+  |> distinct(column: "_field")
+  |> sort(columns: ["_field"])
+```
+
+To get a time series from the selected channels
+
+```flux
+from(bucket: "enercoop")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "tertiaire")
+  |> map(fn: (r) => ({
+      _time: r._time,
+      _value: r._value,
+      _field: "SN: " + string(v: r.device) + " - Ch: " + string(v: r.channel_name)
+  }))
+  |> filter(fn: (r) => contains(value: r._field, set: ${channels:json}))
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> yield(name: "multi_sn_channel")
+```

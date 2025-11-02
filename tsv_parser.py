@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 TSV to InfluxDB 3 Core Parser
-Recursively parses TSV files and loads data into InfluxDB database
+Recursively parses TSV files and loads data into InfluxDB buckets.
 """
 
 import os
@@ -11,10 +11,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Tuple
 import pandas as pd
-from influxdb_client_3 import (
-    InfluxDBClient3, InfluxDBError, Point, WritePrecision,
-    WriteOptions, write_client_options
-)
+import influxdb_client
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -71,7 +70,7 @@ def parse_tsv_header(tsv_file: str) -> Tuple[List[Dict], str]:
 
 
 def parse_tsv_data(tsv_file: str, channel_mappings: List[Dict], campaign: str,
-                   database_name: str, table_name: str) -> List[Point]:
+                   bucket_name: str, table_name: str) -> List[Point]:
     """
     Parse TSV data rows and create InfluxDB Points.
 
@@ -79,7 +78,7 @@ def parse_tsv_data(tsv_file: str, channel_mappings: List[Dict], campaign: str,
         tsv_file: Path to TSV file
         channel_mappings: Channel mapping information from header
         campaign: Campaign name from folder structure
-        database_name: Database name (top folder)
+        bucket_name: Bucket name (top folder)
         table_name: Table name (campaign folder)
 
     Returns:
@@ -138,12 +137,12 @@ def parse_tsv_data(tsv_file: str, channel_mappings: List[Dict], campaign: str,
 
 def extract_path_components(tsv_path: str, base_folder: str) -> Tuple[str, str, str]:
     """
-    Extract database name, campaign name, and device serial from file path.
+    Extract bucket name, campaign name, and device serial from file path.
 
     Structure: base_folder/my_client/campaign/device_serial/file.tsv
 
     Returns:
-        Tuple of (database_name, campaign_name, device_serial)
+        Tuple of (bucket_name, campaign_name, device_serial)
     """
     path = Path(tsv_path)
     relative_path = path.relative_to(base_folder)
@@ -152,14 +151,14 @@ def extract_path_components(tsv_path: str, base_folder: str) -> Tuple[str, str, 
     if len(parts) < 4:
         raise ValueError(f"Invalid path structure: {tsv_path}")
 
-    database_name = parts[0]  # my_client (top folder)
+    bucket_name = parts[0]  # my_client (top folder)
     campaign_name = parts[1]  # campaign folder
     device_serial = parts[2]  # device serial number folder
 
-    return database_name, campaign_name, device_serial
+    return bucket_name, campaign_name, device_serial
 
 
-def process_tsv_file(tsv_file: str, base_folder: str, client: InfluxDBClient3) -> bool:
+def process_tsv_file(tsv_file: str, base_folder: str, client: InfluxDBClient, org: str) -> bool:
     """
     Process a single TSV file and write to InfluxDB.
 
@@ -170,14 +169,14 @@ def process_tsv_file(tsv_file: str, base_folder: str, client: InfluxDBClient3) -
         print(f"Processing: {tsv_file}")
 
         # Extract path components
-        database_name, campaign_name, device_serial = extract_path_components(
+        bucket_name, campaign_name, device_serial = extract_path_components(
             tsv_file, base_folder
         )
 
         # Parse TSV header
         channel_mappings, _ = parse_tsv_header(tsv_file)
 
-        print(f"  Database: {database_name}")
+        print(f"  Bucket: {bucket_name}")
         print(f"  Campaign: {campaign_name}")
         print(f"  Device: {device_serial}")
         print(f"  Channels: {len(channel_mappings)}")
@@ -187,7 +186,7 @@ def process_tsv_file(tsv_file: str, base_folder: str, client: InfluxDBClient3) -
             tsv_file,
             channel_mappings,
             campaign_name,
-            database_name,
+            bucket_name,
             campaign_name  # table name is campaign name
         )
 
@@ -195,9 +194,10 @@ def process_tsv_file(tsv_file: str, base_folder: str, client: InfluxDBClient3) -
 
         # Write to InfluxDB
         if points:
-            # Update client to use correct database
-            client._database = database_name
-            client.write(points, write_precision='s')
+            write_api = client.write_api(write_options=SYNCHRONOUS)
+
+            write_api.write(bucket=bucket_name, org=org, record=points)
+
             print(f"  ✓ Successfully written to InfluxDB")
 
         return True
@@ -230,57 +230,27 @@ def find_tsv_files(base_folder: str) -> List[str]:
     return tsv_files
 
 
-def setup_influxdb_client() -> InfluxDBClient3:
+def setup_influxdb_client() -> InfluxDBClient:
     """
     Setup InfluxDB client with configuration from environment variables.
     """
-    host = os.getenv('INFLUX_HOST')
+    url = os.getenv('INFLUXDB_URL')
     token = os.getenv('INFLUXDB_ADMIN_TOKEN')
-    database = os.getenv('INFLUX_DATABASE', 'default')
+    org = os.getenv('INFLUXDB_ORG')
 
-    if not host or not token:
+    if not url or not token:
         raise ValueError(
-            "Missing required environment variables: INFLUX_HOST and INFLUXDB_ADMIN_TOKEN"
+            "Missing required environment variables: INFLUXDB_URL and INFLUXDB_ADMIN_TOKEN"
         )
 
-    # Define callbacks for batch writing
-    def success(self, data: str):
-        print(f"  Successfully wrote batch")
-
-    def error(self, data: str, exception: InfluxDBError):
-        print(f"  Failed writing batch: {exception}")
-
-    def retry(self, data: str, exception: InfluxDBError):
-        print(f"  Retrying batch write: {exception}")
-
-    # Configure write options
-    write_options = WriteOptions(
-        batch_size=500,
-        flush_interval=10_000,
-        jitter_interval=2_000,
-        retry_interval=5_000,
-        max_retries=5,
-        max_retry_delay=30_000,
-        exponential_base=2
-    )
-
-    # Create write client options
-    wco = write_client_options(
-        success_callback=success,
-        error_callback=error,
-        retry_callback=retry,
-        write_options=write_options
-    )
-
     # Create client
-    client = InfluxDBClient3(
-        host=host,
+    client = influxdb_client.InfluxDBClient(
+        url=url,
         token=token,
-        database=database,
-        write_client_options=wco
+        org=org,
     )
 
-    return client
+    return client, org
 
 
 def main():
@@ -288,15 +258,15 @@ def main():
     Main function to process TSV files recursively.
     """
     print("=" * 70)
-    print("TSV to InfluxDB 3 Core Parser")
+    print("TSV to InfluxDB2 Parser")
     print("=" * 70)
 
+    # Get TSV file from command line arguments or find all TSV files
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dataFolder", help="Path to the data folder (ex: /srv/powerview/data)")
     parser.add_argument("-t", "--tsvFile", help="Path to the TSV file(s)")
     args = parser.parse_args()
 
-    # Get TSV file from command line arguments or find all TSV files
     if args.tsvFile and args.dataFolder:
         base_folder = args.dataFolder
         if not os.path.exists(base_folder):
@@ -325,8 +295,8 @@ def main():
 
     # Setup InfluxDB client
     try:
-        client = setup_influxdb_client()
-        print(f"Connected to InfluxDB at {os.getenv('INFLUX_HOST')}\n")
+        client, org = setup_influxdb_client()
+        print(f"Connected to InfluxDB at {os.getenv('INFLUXDB_URL')}\n")
     except Exception as e:
         print(f"Error connecting to InfluxDB: {str(e)}")
         sys.exit(1)
@@ -336,7 +306,7 @@ def main():
     failed = 0
 
     for tsv_file in tsv_files:
-        if process_tsv_file(tsv_file, base_folder, client):
+        if process_tsv_file(tsv_file, base_folder, client, org):
             rename_parsed_file(tsv_file)
             successful += 1
         else:
