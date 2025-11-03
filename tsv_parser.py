@@ -234,13 +234,13 @@ def setup_influxdb_client() -> InfluxDBClient:
     """
     Setup InfluxDB client with configuration from environment variables.
     """
-    url = os.getenv('INFLUXDB_URL')
+    url = os.getenv('INFLUXDB_HOST')
     token = os.getenv('INFLUXDB_ADMIN_TOKEN')
     org = os.getenv('INFLUXDB_ORG')
 
     if not url or not token:
         raise ValueError(
-            "Missing required environment variables: INFLUXDB_URL and INFLUXDB_ADMIN_TOKEN"
+            "Missing required environment variables: INFLUXDB_HOST and INFLUXDB_ADMIN_TOKEN"
         )
 
     # Create client
@@ -296,7 +296,7 @@ def main():
     # Setup InfluxDB client
     try:
         client, org = setup_influxdb_client()
-        print(f"Connected to InfluxDB at {os.getenv('INFLUXDB_URL')}\n")
+        print(f"Connected to InfluxDB at {os.getenv('INFLUXDB_HOST')}\n")
     except Exception as e:
         print(f"Error connecting to InfluxDB: {str(e)}")
         sys.exit(1)
