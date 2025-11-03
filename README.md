@@ -120,6 +120,7 @@ and add ownership for ubuntu user on `/srv` sub-folders
 
 ```shell
 sudo setfacl -d -R -m u:ubuntu:rwx /srv/
+sudo chown -R sftpgo:sftpgo /srv/
 ```
 
 ## General workflow
