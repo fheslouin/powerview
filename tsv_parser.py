@@ -173,6 +173,9 @@ def process_tsv_file(tsv_file: str, base_folder: str, client: InfluxDBClient, or
             tsv_file, base_folder
         )
 
+        # Ensure bucket exists
+        create_bucket_if_not_exists(client, bucket_name, org)
+
         # Parse TSV header
         channel_mappings, _ = parse_tsv_header(tsv_file)
 
@@ -251,6 +254,17 @@ def setup_influxdb_client() -> InfluxDBClient:
     )
 
     return client, org
+
+def create_bucket_if_not_exists(client: InfluxDBClient, bucket_name: str, org: str) -> None:
+    """
+    Create InfluxDB bucket if it does not exist.
+    """
+    buckets_api = client.buckets_api()
+    existing_buckets = buckets_api.find_buckets().buckets
+
+    if not any(bucket.name == bucket_name for bucket in existing_buckets):
+        print(f"Creating bucket: {bucket_name}")
+        buckets_api.create_bucket(bucket_name=bucket_name, org=org)
 
 
 def main():
