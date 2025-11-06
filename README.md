@@ -83,8 +83,12 @@ Create a config file to trigger a script each time a TSV file or folder are uplo
 
 ```shell
 cat <<EOF > /etc/sftpgo/sftpgo.env
-SFTPGO_COMMON__ACTIONS__EXECUTE_ON=upload,mkdir
+SFTPGO_COMMON__ACTIONS__EXECUTE_ON=mkdir
 SFTPGO_COMMON__ACTIONS__HOOK=/srv/powerview/on-upload.sh
+SFTPGO_COMMON__POST_DISCONNECT_HOOK=/srv/powerview/on-upload.sh
+SFTPGO_COMMAND__COMMANDS__0__PATH=/srv/powerview/on-upload.sh
+SFTPGO_COMMAND__COMMANDS__0__ENV=SFTPGO_ACTION=upload
+SFTPGO_COMMAND__COMMANDS__0__HOOK=post_disconnect
 EOF
 ```
 
@@ -178,9 +182,9 @@ Once done, you'll be able to see a new Dashboard created in Grafana based on dat
 To get all channels as a dashboard variables
 
 ```flux
-from(bucket: "enercoop")
+from(bucket: v.defaultBucket)
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "tertiaire")
+  |> filter(fn: (r) => r._measurement == "${__dashboard.name}")
   |> filter(fn: (r) => r.unit == "W")
   |> map(fn: (r) => ({
       _field: "SN: " + string(v: r.device) + " - Ch: " + string(v: r.channel_name)
@@ -192,9 +196,9 @@ from(bucket: "enercoop")
 To get a time series from the selected channels
 
 ```flux
-from(bucket: "enercoop")
+from(bucket: v.defaultBucket)
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "tertiaire")
+  |> filter(fn: (r) => r._measurement == "${__dashboard.name}")
   |> map(fn: (r) => ({
       _time: r._time,
       _value: r._value,
