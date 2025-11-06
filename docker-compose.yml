@@ -1,4 +1,19 @@
 services:
+  caddy:
+    image: docker.io/caddy:2.10.2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy-conf:/etc/caddy
+      - caddy-data:/data
+      - caddy-config:/config
+
   influxdb2:
     image: influxdb:2
     container_name: influxdb
@@ -39,6 +54,8 @@ services:
       - grafana-data:/var/lib/grafana
 
 volumes:
+  caddy-data:
+  caddy-config:
   influxdb2-data:
   influxdb2-config:
   grafana-data:

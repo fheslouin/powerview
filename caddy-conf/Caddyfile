@@ -1,0 +1,14 @@
+{
+    # Set your ACME contact email for Let's Encrypt notifications
+    email contact@adecwatts.fr
+}
+
+powerview.adecwatts.fr {
+    # Reverse proxy to the local service running on port 3000
+    reverse_proxy grafana:3000
+}
+
+db.powerview.adecwatts.fr {
+    # Reverse proxy to the local service running on port 8088
+    reverse_proxy influxdb:8086
+}
