@@ -72,9 +72,9 @@ setup_environment() {
 # ============================================
 
 handle_upload() {
-    local file_path="$1"
+    # local file_path="$1"
 
-    log "Upload complete action for file: ${file_path}"
+    # log "Upload complete action for file: ${file_path}"
 
     setup_environment
 
@@ -82,12 +82,11 @@ handle_upload() {
         log_error "TSV parser not found: ${TSV_PARSER}"
     fi
 
-#     if ! python3 "${TSV_PARSER}" "${DATA_DIR}" 2>&1 | tee -a "${LOG_FILE}"; then
-      if ! python3 "${TSV_PARSER}" --dataFolder "${DATA_DIR}" --tsvFile "${file_path}" 2>&1 | tee -a "${LOG_FILE}"; then
-        log_error "TSV parser failed for: ${file_path}"
+      if ! python3 "${TSV_PARSER}" --dataFolder "${DATA_DIR}" 2>&1 | tee -a "${LOG_FILE}"; then
+        log_error "TSV parser failed"
     fi
 
-    log "Upload processing completed successfully for: ${file_path}"
+    log "Upload processing completed"
 }
 
 handle_mkdir() {
@@ -128,27 +127,28 @@ main() {
         log_error "SFTPGO_ACTION environment variable not set"
     fi
 
-    if [[ -z "${SFTPGO_ACTION_PATH:-}" ]]; then
-        log_error "SFTPGO_ACTION_PATH environment variable not set"
-    fi
-
-    local file_path="${SFTPGO_ACTION_PATH}"
-    local company_name
-    local campaign_name
-    local device_sn
-
-    # Extract path components
-    company_name="$(extract_path_component "${file_path}" "${COMPANY_INDEX}")"
-    campaign_name="$(extract_path_component "${file_path}" "${CAMPAIGN_INDEX}")"
-    device_sn="$(extract_path_component "${file_path}" "${DEVICE_INDEX}")"
-
     # Handle different actions
     case "${SFTPGO_ACTION}" in
         "upload")
-            handle_upload "${file_path}"
+            handle_upload
             ;;
 
         "mkdir")
+
+            if [[ -z "${SFTPGO_ACTION_PATH:-}" ]]; then
+                log_error "SFTPGO_ACTION_PATH environment variable not set"
+            fi
+
+            local file_path="${SFTPGO_ACTION_PATH}"
+            local company_name
+            local campaign_name
+            local device_sn
+
+            # Extract path components
+            company_name="$(extract_path_component "${file_path}" "${COMPANY_INDEX}")"
+            campaign_name="$(extract_path_component "${file_path}" "${CAMPAIGN_INDEX}")"
+            device_sn="$(extract_path_component "${file_path}" "${DEVICE_INDEX}")"
+
             handle_mkdir "${file_path}" "${company_name}" "${campaign_name}" "${device_sn}"
             ;;
 

@@ -7,7 +7,7 @@ cryptography==46.0.3
 docopt==0.6.2
 dotenv==0.9.9
 idna==3.11
-influxdb3-python==0.16.0
+influxdb-client==1.49.0
 Jinja2==3.1.6
 MarkupSafe==3.0.3
 numpy==2.3.4
