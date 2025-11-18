@@ -49,9 +49,11 @@ services:
                           grafana-piechart-panel,\
                           volkovlabs-form-panel, \
                           grafana-simple-json-datasource"
+      GF_PLUGINS_PREINSTALL: "influx-adecwatts@/tmp/grafana-plugins/influx-adecwatts.zip"
       GF_SECURITY_ADMIN_PASSWORD: $GRAFANA_PASSWORD
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana-plugins:/tmp/grafana-plugins
 
 volumes:
   caddy-data:
