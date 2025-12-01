@@ -64,6 +64,54 @@ cp .env.sample .env
 podman compose up -d
 ```
 
+### Install Caddy on host
+
+#### Add repository and install Caddy package
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+chmod o+r /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install caddy
+```
+
+#### Create Caddy config
+
+```shell
+cat << EOF | sudo tee /etc/caddy/Caddyfile
+{
+    # Set your ACME contact email for Let's Encrypt notifications
+    email contact@adecwatts.fr
+}
+
+ftp.powerview.adecwatts.fr {
+    # Reverse proxy to FTP service running on port 8080
+    reverse_proxy localhost:8080
+}
+
+powerview.adecwatts.fr {
+    # Reverse proxy to grafana service running on port 3000
+    reverse_proxy localhost:8088
+}
+
+db.powerview.adecwatts.fr {
+    # Reverse proxy to influxdb service running on port 8086
+    reverse_proxy localhost:8086
+}
+EOF
+```
+
+#### Apply changes
+
+Restart Caddy to apply changes
+
+```shell
+sudo systemctl restart caddy
+```
+
 ### Install SFTPGo server
 
 Install the server
@@ -82,7 +130,7 @@ systemctl status sftpgo
 Create a config file to trigger a script each time a TSV file or folder are uploded
 
 ```shell
-cat <<EOF > /etc/sftpgo/sftpgo.env
+cat << EOF | sudo tee /etc/sftpgo/sftpgo.env
 SFTPGO_COMMON__ACTIONS__EXECUTE_ON=mkdir
 SFTPGO_COMMON__ACTIONS__HOOK=/srv/powerview/on-upload.sh
 SFTPGO_COMMON__POST_DISCONNECT_HOOK=/srv/powerview/on-upload.sh
