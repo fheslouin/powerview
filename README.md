@@ -175,6 +175,23 @@ sudo setfacl -d -R -m u:ubuntu:rwx /srv/
 sudo chown -R sftpgo:sftpgo /srv/
 ```
 
+## Security
+
+Enable firewall and allow traffics over 443 and 2022 ports
+
+```shell
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow OpenSSH
+sudo ufw limit ssh
+sudo ufw allow https
+sudo ufw allow 2022
+sudo ufw enable
+```
+
+Grafana, InfluxDB and FTP Webservice are available behind Caddy reverse proxy on 443
+sFTP service is available over 2022 port
+
 ## General workflow
 
 We now have Grafana, Influxdb and a FTP server running.
