@@ -9,6 +9,7 @@ import pytest
 
 # On importe le module à tester
 import tsv_parser
+import influx_utils
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +130,10 @@ def test_parse_tsv_data_creates_points(monkeypatch, tmp_path):
     assert isinstance(p0._time, int)
 
 
-def test_parse_tsv_data_invalid_timestamp_is_skipped(tmp_path, capsys):
+def test_parse_tsv_data_invalid_timestamp_is_skipped(tmp_path, caplog):
     """
     Vérifie qu'une ligne avec timestamp invalide est ignorée.
+    On vérifie maintenant le warning via le logger (caplog) plutôt que stdout.
     """
     content = """
     02001171\t02001171
@@ -141,6 +143,9 @@ def test_parse_tsv_data_invalid_timestamp_is_skipped(tmp_path, capsys):
     """
     tsv_file = write_tmp_tsv(tmp_path, content)
     mappings, _ = tsv_parser.parse_tsv_header(str(tsv_file))
+
+    # On capture les logs au niveau WARNING
+    caplog.set_level("WARNING", logger="tsv_parser")
 
     points, stats = tsv_parser.parse_tsv_data(
         str(tsv_file),
@@ -154,13 +159,15 @@ def test_parse_tsv_data_invalid_timestamp_is_skipped(tmp_path, capsys):
     assert len(points) == 1
     assert stats["nb_invalid_timestamps"] == 1
 
-    captured = capsys.readouterr()
-    assert "Warning: Could not parse timestamp" in captured.out
+    # Vérifie que le warning a bien été loggé
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any("Could not parse timestamp" in m for m in messages)
 
 
-def test_parse_tsv_data_invalid_value_is_skipped(tmp_path, capsys):
+def test_parse_tsv_data_invalid_value_is_skipped(tmp_path, caplog):
     """
     Vérifie qu'une valeur non numérique est ignorée pour un canal.
+    On vérifie maintenant le warning via le logger (caplog) plutôt que stdout.
     """
     content = """
     02001171\t02001171
@@ -169,6 +176,8 @@ def test_parse_tsv_data_invalid_value_is_skipped(tmp_path, capsys):
     """
     tsv_file = write_tmp_tsv(tmp_path, content)
     mappings, _ = tsv_parser.parse_tsv_header(str(tsv_file))
+
+    caplog.set_level("WARNING", logger="tsv_parser")
 
     points, stats = tsv_parser.parse_tsv_data(
         str(tsv_file),
@@ -182,8 +191,8 @@ def test_parse_tsv_data_invalid_value_is_skipped(tmp_path, capsys):
     assert len(points) == 0
     assert stats["nb_invalid_values"] == 1
 
-    captured = capsys.readouterr()
-    assert "Warning: Invalid value at column" in captured.out
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any("Invalid value at column" in m for m in messages)
 
 
 # ---------------------------------------------------------------------------
@@ -320,12 +329,15 @@ def test_find_tsv_files_excludes_parsed(tmp_path):
 # Tests pour rename_parsed_file
 # ---------------------------------------------------------------------------
 
-def test_rename_parsed_file(tmp_path, capsys):
+def test_rename_parsed_file(tmp_path, caplog):
     """
-    Vérifie que rename_parsed_file renomme correctement le fichier.
+    Vérifie que rename_parsed_file renomme correctement le fichier
+    et loggue un message d'info.
     """
     file_path = tmp_path / "T302_251012_031720.tsv"
     file_path.write_text("dummy", encoding="utf-8")
+
+    caplog.set_level("INFO", logger="tsv_parser")
 
     tsv_parser.rename_parsed_file(str(file_path))
 
@@ -333,8 +345,8 @@ def test_rename_parsed_file(tmp_path, capsys):
     assert new_path.exists()
     assert not file_path.exists()
 
-    captured = capsys.readouterr()
-    assert "Renamed to: PARSED_T302_251012_031720.tsv" in captured.out
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any("Renamed to: PARSED_T302_251012_031720.tsv" in m for m in messages)
 
 
 # ---------------------------------------------------------------------------
@@ -394,14 +406,14 @@ def test_create_bucket_if_not_exists_creates(monkeypatch):
     # Aucun bucket au départ
     assert client.buckets_api().find_buckets().buckets == []
 
-    tsv_parser.create_bucket_if_not_exists(client, "company1", org)
+    influx_utils.create_bucket_if_not_exists(client, "company1", org)
 
     buckets = client.buckets_api().find_buckets().buckets
     assert len(buckets) == 1
     assert buckets[0].name == "company1"
 
     # Deuxième appel ne doit pas recréer un bucket
-    tsv_parser.create_bucket_if_not_exists(client, "company1", org)
+    influx_utils.create_bucket_if_not_exists(client, "company1", org)
     buckets2 = client.buckets_api().find_buckets().buckets
     assert len(buckets2) == 1
 
@@ -452,4 +464,4 @@ def test_setup_influxdb_client_missing_env(monkeypatch):
     monkeypatch.delenv("INFLUXDB_ORG", raising=False)
 
     with pytest.raises(ValueError):
-        tsv_parser.setup_influxdb_client()
+        influx_utils.setup_influxdb_client()
