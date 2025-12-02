@@ -13,7 +13,8 @@ import influx_utils
 from core import parse_tsv_data, parse_tsv_header
 from fs_utils import (
     extract_path_components as _extract_path_components,
-    rename_parsed_file as _rename_parsed_file,
+    move_parsed_file as _move_parsed_file,
+    move_error_file as _move_error_file,
     find_tsv_files as _find_tsv_files,
 )
 
@@ -308,50 +309,81 @@ def test_extract_path_components_invalid_path():
 # Tests pour find_tsv_files
 # ---------------------------------------------------------------------------
 
-def test_find_tsv_files_excludes_parsed(tmp_path):
+def test_find_tsv_files_excludes_parsed_and_error(tmp_path):
     """
-    Vérifie que find_tsv_files ignore les fichiers préfixés par PARSED_.
+    Vérifie que find_tsv_files ignore les fichiers dans parsed/ et error/.
     """
     base = tmp_path / "data"
     base.mkdir()
 
+    # Fichiers bruts à la racine et dans un sous-dossier
     (base / "a.tsv").write_text("x", encoding="utf-8")
-    (base / "PARSED_b.tsv").write_text("y", encoding="utf-8")
     sub = base / "sub"
     sub.mkdir()
     (sub / "c.tsv").write_text("z", encoding="utf-8")
 
-    files = tsv_parser.find_tsv_files(str(base))
+    # Fichiers déjà traités / en erreur
+    parsed_dir = base / "parsed"
+    parsed_dir.mkdir()
+    (parsed_dir / "PARSED_b.tsv").write_text("y", encoding="utf-8")
 
-    # On doit trouver a.tsv et sub/c.tsv, mais pas PARSED_b.tsv
+    error_dir = base / "error"
+    error_dir.mkdir()
+    (error_dir / "ERROR_d.tsv").write_text("w", encoding="utf-8")
+
+    files = _find_tsv_files(str(base))
+
     basenames = {Path(f).name for f in files}
     assert "a.tsv" in basenames
     assert "c.tsv" in basenames
     assert "PARSED_b.tsv" not in basenames
+    assert "ERROR_d.tsv" not in basenames
 
 
 # ---------------------------------------------------------------------------
-# Tests pour rename_parsed_file
+# Tests pour move_parsed_file / move_error_file
 # ---------------------------------------------------------------------------
 
-def test_rename_parsed_file(tmp_path, caplog):
+def test_move_parsed_file(tmp_path, caplog):
     """
-    Vérifie que rename_parsed_file renomme correctement le fichier
-    et loggue un message d'info.
+    Vérifie que move_parsed_file déplace correctement le fichier
+    dans un sous-dossier parsed/ et loggue un message d'info.
     """
     file_path = tmp_path / "T302_251012_031720.tsv"
     file_path.write_text("dummy", encoding="utf-8")
 
     caplog.set_level("INFO", logger="tsv_parser")
 
-    tsv_parser.rename_parsed_file(str(file_path))
+    _move_parsed_file(str(file_path))
 
-    new_path = tmp_path / "PARSED_T302_251012_031720.tsv"
+    parsed_dir = tmp_path / "parsed"
+    new_path = parsed_dir / "T302_251012_031720.tsv"
     assert new_path.exists()
     assert not file_path.exists()
 
     messages = [rec.getMessage() for rec in caplog.records]
-    assert any("Renamed to: PARSED_T302_251012_031720.tsv" in m for m in messages)
+    assert any("Moved parsed file to:" in m for m in messages)
+
+
+def test_move_error_file(tmp_path, caplog):
+    """
+    Vérifie que move_error_file déplace correctement le fichier
+    dans un sous-dossier error/ et loggue un message d'info.
+    """
+    file_path = tmp_path / "T302_251012_031720.tsv"
+    file_path.write_text("dummy", encoding="utf-8")
+
+    caplog.set_level("INFO", logger="tsv_parser")
+
+    _move_error_file(str(file_path))
+
+    error_dir = tmp_path / "error"
+    new_path = error_dir / "T302_251012_031720.tsv"
+    assert new_path.exists()
+    assert not file_path.exists()
+
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any("Moved error file to:" in m for m in messages)
 
 
 # ---------------------------------------------------------------------------

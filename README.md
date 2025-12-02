@@ -240,6 +240,82 @@ SFTPGo creates event that are catch each time a file is uploaded or a directory 
 
 Once done, you'll be able to see a new Dashboard created in Grafana based on data imported by the python parser.
 
+## Workflow de traitement des données (détaillé)
+
+Cette section résume le flux complet, de l’upload d’un fichier TSV jusqu’à l’affichage dans Grafana, en tenant compte de la nouvelle logique de déplacement des fichiers dans des sous-dossiers `parsed/` et `error/`.
+
+1. **Upload SFTP**
+   * Un client dépose un fichier TSV sur le serveur SFTP (SFTPGo).
+   * Le fichier est initialement stocké sous la forme :
+     `/srv/sftpgo/data/<company>/<campaign>/<device_master_sn>/<fichier>.tsv`.
+   * SFTPGo déclenche un hook qui exécute `/srv/powerview/on-upload.sh` avec des variables d’environnement (notamment `SFTPGO_ACTION` et `SFTPGO_ACTION_PATH`).
+
+2. **Script `on-upload.sh` – cas `upload`**
+   * Si `SFTPGO_ACTION=upload` :
+     * Le script active l’environnement virtuel Python et charge le fichier `.env`.
+     * Il appelle le parseur Python sur le fichier uploadé :
+       ```bash
+       python3 /srv/powerview/tsv_parser.py \
+         --dataFolder /srv/sftpgo/data \
+         --tsvFile "$SFTPGO_ACTION_PATH"
+       ```
+     * Toute la sortie (logs) est écrite dans `/srv/sftpgo/logs/uploads.log`.
+
+3. **Parsing TSV et écriture dans InfluxDB (`tsv_parser.py`)**
+   * Le script :
+     * déduit `company`, `campaign` et `device_master_sn` à partir du chemin du fichier,
+     * crée le bucket InfluxDB `<company>` s’il n’existe pas encore,
+     * lit le header du TSV pour détecter le format (actuellement `MV_T302_V002`),
+     * construit les mappings de canaux (device, numéro de canal, unité, etc.),
+     * parse toutes les lignes de données et crée des points InfluxDB :
+       * bucket = `<company>`
+       * measurement = `<campaign>`
+       * tags : `campaign`, `device_sn`, `device_master_sn`, `channel_id`, `channel_name`, `channel_number`, `channel_type`, `unit`, etc.
+     * écrit les points dans InfluxDB,
+     * génère un rapport JSON d’exécution et un résumé dans un bucket meta (par défaut `powerview_meta`).
+
+4. **Gestion des fichiers après traitement (`parsed/` et `error/`)**
+   * La logique de post-traitement des fichiers est maintenant la suivante :
+     * Si le fichier est **traité avec succès** (parsing + écriture InfluxDB OK) :
+       * il est déplacé dans un sous-dossier `parsed` du device :
+         ```text
+         /srv/sftpgo/data/<company>/<campaign>/<device_master_sn>/parsed/<fichier>.tsv
+         ```
+     * Si une **erreur** survient pendant le traitement (exception dans le parseur ou l’écriture InfluxDB) :
+       * le fichier est déplacé dans un sous-dossier `error` du device :
+         ```text
+         /srv/sftpgo/data/<company>/<campaign>/<device_master_sn>/error/<fichier>.tsv
+         ```
+   * La fonction `find_tsv_files` ignore explicitement les sous-dossiers `parsed/` et `error/`, ce qui garantit que :
+     * seuls les fichiers “bruts” à la racine du device sont (re)traités,
+     * les fichiers déjà traités ou en erreur ne sont pas rescannés.
+
+5. **Script `on-upload.sh` – cas `mkdir`**
+   * Si `SFTPGO_ACTION=mkdir` :
+     * Le script extrait `company` et `campaign` à partir du chemin créé sous `/srv/sftpgo/data`.
+     * Si le dossier correspond à un niveau `company/campaign` (et non à un dossier de device), il lance un playbook Ansible :
+       ```bash
+       ansible-playbook /srv/powerview/grafana-automation/playbooks/create_grafana_resources.yml \
+         --extra-vars "company_name=<company> campaign_name=<campaign>"
+       ```
+
+6. **Automatisation Grafana (Ansible)**
+   * Le playbook `create_grafana_resources.yml` :
+     * crée (ou vérifie l’existence de) l’équipe Grafana `<company>`,
+     * crée le dossier Grafana `<company>`,
+     * crée une datasource InfluxDB `influxdb_<company>` pointant sur le bucket `<company>` (mode Flux),
+     * exporte un dashboard maître, le duplique et l’adapte pour la campagne (`title = <campaign>`, datasource mise à jour),
+     * importe ce nouveau dashboard dans le dossier `<company>`,
+     * applique les permissions (l’équipe `<company>` a accès en lecture au dossier et au dashboard),
+     * crée un fichier `.dashboard.created` dans `/srv/sftpgo/data/<company>/<campaign>/` pour éviter de recréer les ressources à chaque événement.
+
+7. **Visualisation dans Grafana**
+   * Les dashboards créés automatiquement utilisent des requêtes Flux basées sur :
+     * le bucket = `<company>`,
+     * le measurement = `<campaign>`,
+     * les tags (`device_master_sn`, `channel_name`, `unit`, etc.).
+   * Dès que les fichiers TSV sont parsés et injectés, les données deviennent visibles dans Grafana via ces dashboards.
+
 ## Divers
 
 ### Grafana Flux query
@@ -272,4 +348,3 @@ from(bucket: v.defaultBucket)
   |> filter(fn: (r) => contains(value: r._field, set: ${channels:json}))
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> yield(name: "multi_sn_channel")
-```

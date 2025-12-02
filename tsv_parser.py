@@ -20,7 +20,9 @@ from influxdb_client import InfluxDBClient
 from core import TSVParserFactory, parse_tsv_header
 from fs_utils import (
     extract_path_components as _extract_path_components,
-    find_tsv_files, rename_parsed_file,
+    find_tsv_files,
+    move_parsed_file,
+    move_error_file,
 )
 from influx_utils import (
     setup_influxdb_client,
@@ -336,9 +338,17 @@ def main():
             if ok:
                 successful += 1
                 run_report["nb_points_total"] += file_report.get("nb_points", 0)
-                rename_parsed_file(tsv_file)
+                # Fichier traité avec succès -> on le déplace dans parsed/
+                move_parsed_file(tsv_file)
             else:
                 failed += 1
+                # Erreur de traitement -> on le déplace dans error/
+                try:
+                    move_error_file(tsv_file)
+                except Exception as e:
+                    logger.warning(
+                        "Impossible de déplacer le fichier en erreur vers 'error/': %s", e
+                    )
 
     logger.info("=" * 70)
     logger.info("Processing complete!")

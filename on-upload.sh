@@ -2,7 +2,10 @@
 
 set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 
-set -x            # Enable command tracing for debugging
+# Active le tracing uniquement si DEBUG=1 dans l'environnement
+if [[ "${DEBUG:-0}" == "1" ]]; then
+    set -x
+fi
 
 # ============================================
 # Configuration Variables
@@ -12,17 +15,19 @@ readonly SFTPGO_BASE="${BASE_DIR}/sftpgo"
 readonly POWERVIEW_BASE="${BASE_DIR}/powerview"
 
 readonly LOG_FILE="${SFTPGO_BASE}/logs/uploads.log"
-readonly DATA_DIR="${SFTPGO_BASE}/data/"
+readonly DATA_DIR="${SFTPGO_BASE}/data"
 readonly VENV_PATH="${POWERVIEW_BASE}/envs/powerview/bin/activate"
 readonly ENV_FILE="${POWERVIEW_BASE}/.env"
 readonly TSV_PARSER="${POWERVIEW_BASE}/tsv_parser.py"
 readonly ANSIBLE_PLAYBOOK="${POWERVIEW_BASE}/grafana-automation/playbooks/create_grafana_resources.yml"
 
-# Path structure indices (adjust if your structure changes)
+# Indices de structure conservés si besoin ailleurs, mais on ne les utilise plus
+# directement pour extraire company/campaign/device.
 readonly COMPANY_INDEX=5
 readonly CAMPAIGN_INDEX=6
 readonly DEVICE_INDEX=7
 
+# Redirige stdout/stderr vers le fichier de log
 exec 3>&1 1>>"${LOG_FILE}" 2>&1
 
 # ============================================
@@ -40,11 +45,38 @@ log_error() {
     exit 1
 }
 
-# Extract path component by index
+# Extract path component by index (non utilisé dans la nouvelle logique,
+# mais conservé pour compatibilité potentielle)
 extract_path_component() {
     local path="$1"
     local index="$2"
     echo "${path}" | cut -d/ -f"${index}"
+}
+
+# Extrait company / campaign / device à partir d'un chemin absolu,
+# en le rendant relatif à DATA_DIR.
+extract_relative_components() {
+    local file_path="$1"
+
+    # S'assure que le chemin commence bien par DATA_DIR
+    if [[ "${file_path}" != "${DATA_DIR}"* ]]; then
+        log_error "Le chemin '${file_path}' ne se trouve pas sous DATA_DIR='${DATA_DIR}'"
+    fi
+
+    # Supprime le préfixe DATA_DIR (éventuel slash de plus)
+    local relative="${file_path#${DATA_DIR}}"
+    relative="${relative#/}"  # enlève un / de tête éventuel
+
+    # relative = company/campaign/device/... ou company/campaign/...
+    local company_name
+    local campaign_name
+    local device_sn
+
+    company_name="$(echo "${relative}" | cut -d/ -f1)"
+    campaign_name="$(echo "${relative}" | cut -d/ -f2)"
+    device_sn="$(echo "${relative}" | cut -d/ -f3)"
+
+    echo "${company_name}" "${campaign_name}" "${device_sn}"
 }
 
 # Activate Python virtual environment and load env variables
@@ -60,7 +92,7 @@ setup_environment() {
     # shellcheck disable=SC1090
     source "${VENV_PATH}"
 
-    # Safer way to export env variables
+    # Exporte les variables du .env
     set -a
     # shellcheck disable=SC1090
     source "${ENV_FILE}"
@@ -72,9 +104,13 @@ setup_environment() {
 # ============================================
 
 handle_upload() {
-    # local file_path="$1"
+    local file_path="${SFTPGO_ACTION_PATH:-}"
 
-    # log "Upload complete action for file: ${file_path}"
+    if [[ -z "${file_path}" ]]; then
+        log_error "SFTPGO_ACTION_PATH environment variable not set for upload"
+    fi
+
+    log "Upload complete action triggered by: ${file_path}"
 
     setup_environment
 
@@ -82,22 +118,28 @@ handle_upload() {
         log_error "TSV parser not found: ${TSV_PARSER}"
     fi
 
-      if ! python3 "${TSV_PARSER}" --dataFolder "${DATA_DIR}" 2>&1 | tee -a "${LOG_FILE}"; then
-        log_error "TSV parser failed"
+    # Traitement fichier par fichier : on passe à tsv_parser.py
+    # - le dossier racine des données (DATA_DIR)
+    # - le chemin complet du fichier uploadé
+    if ! python3 "${TSV_PARSER}" \
+        --dataFolder "${DATA_DIR}" \
+        --tsvFile "${file_path}" \
+        2>&1 | tee -a "${LOG_FILE}"; then
+        log_error "TSV parser failed for file: ${file_path}"
     fi
 
-    log "Upload processing completed"
+    log "Upload processing completed for: ${file_path}"
 }
 
 handle_mkdir() {
     local file_path="$1"
-    local company_name="$2"
-    local campaign_name="$3"
-    local device_sn="$4"
+
+    # Extrait company / campaign / device à partir du chemin relatif à DATA_DIR
+    read -r company_name campaign_name device_sn < <(extract_relative_components "${file_path}")
 
     # Only run if DEVICE_SN is empty (not a device-level directory)
     if [[ -z "${device_sn}" ]]; then
-        log "Mkdir action for: ${file_path}"
+        log "Mkdir action for: ${file_path} (company='${company_name}', campaign='${campaign_name}')"
 
         setup_environment
 
@@ -113,7 +155,7 @@ handle_mkdir() {
 
         log "Grafana resources created successfully for: ${company_name}/${campaign_name}"
     else
-        log "Skipping mkdir action for device-level directory: ${file_path}"
+        log "Skipping mkdir action for device-level directory: ${file_path} (device_sn='${device_sn}')"
     fi
 }
 
@@ -127,33 +169,23 @@ main() {
         log_error "SFTPGO_ACTION environment variable not set"
     fi
 
-    # Handle different actions
     case "${SFTPGO_ACTION}" in
         "upload")
             handle_upload
             ;;
 
         "mkdir")
-
             if [[ -z "${SFTPGO_ACTION_PATH:-}" ]]; then
-                log_error "SFTPGO_ACTION_PATH environment variable not set"
+                log_error "SFTPGO_ACTION_PATH environment variable not set for mkdir"
             fi
 
             local file_path="${SFTPGO_ACTION_PATH}"
-            local company_name
-            local campaign_name
-            local device_sn
-
-            # Extract path components
-            company_name="$(extract_path_component "${file_path}" "${COMPANY_INDEX}")"
-            campaign_name="$(extract_path_component "${file_path}" "${CAMPAIGN_INDEX}")"
-            device_sn="$(extract_path_component "${file_path}" "${DEVICE_INDEX}")"
-
-            handle_mkdir "${file_path}" "${company_name}" "${campaign_name}" "${device_sn}"
+            handle_mkdir "${file_path}"
             ;;
 
         *)
-            log "Unknown action: ${SFTPGO_ACTION} for file: ${file_path}"
+            # Action inconnue : on loggue mais on ne casse pas SFTPGo
+            log "Unknown action: ${SFTPGO_ACTION}"
             exit 0
             ;;
     esac
