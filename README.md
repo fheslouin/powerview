@@ -224,7 +224,7 @@ For each uploaded file, it will be pushed in the tree shown below
 │               └── T302_251021_031740.tsv
 ```
 
-data / client_name / campaign_name / device_serial_number / \*.tsv files
+data / client_name / campaign_name / device_master_sn / \*.tsv files
 
 SFTPGo creates event that are catch each time a file is uploaded or a directory is created.
 `on-upload.sh` react on this event and does two things :
