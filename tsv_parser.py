@@ -4,31 +4,30 @@ TSV to InfluxDB 3 Core Parser
 Recursively parses TSV files and loads data into InfluxDB buckets.
 """
 
+import argparse
+import json
+import logging
 import os
 import sys
-import argparse
-from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Tuple, Any
-import json
 import time
-import logging
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Tuple, Any
 
-from influxdb_client import InfluxDBClient
 from dotenv import load_dotenv
+from influxdb_client import InfluxDBClient
 
+from core import TSVParserFactory, parse_tsv_header
+from fs_utils import (
+    extract_path_components as _extract_path_components,
+    find_tsv_files, rename_parsed_file,
+)
 from influx_utils import (
     setup_influxdb_client,
     create_bucket_if_not_exists,
     write_points,
     write_run_summary_to_influx,
 )
-from fs_utils import (
-    extract_path_components as _extract_path_components,
-    rename_parsed_file as _rename_parsed_file,
-    find_tsv_files as _find_tsv_files,
-)
-from core import TSVParserFactory
 
 # Load environment variables from .env file
 load_dotenv()
@@ -56,65 +55,8 @@ def setup_logging() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Parsing du header directement avec la factory
-# ---------------------------------------------------------------------------
-
-def parse_tsv_header(tsv_file: str) -> Tuple[List[Dict], str]:
-    """
-    Lit les deux premières lignes du fichier, détecte le format et
-    délègue la construction des mappings au parser adapté.
-
-    Retourne:
-        (channel_mappings, file_format)
-    """
-    with open(tsv_file, "r", encoding="utf-8") as f:
-        line1 = f.readline().strip().split("\t")  # SN devices
-        line2 = f.readline().strip().split("\t")  # format + nom canal + unité
-
-    file_format = line2[0]
-    parser = TSVParserFactory.get_parser(file_format)
-
-    if hasattr(parser, "build_channel_mappings"):
-        channel_mappings, _ = parser.build_channel_mappings(line1, line2)
-    else:
-        # Fallback générique : on laisse le parser relire le fichier
-        channel_mappings, _ = parser.parse_header(tsv_file)
-
-    return channel_mappings, file_format
 
 
-def parse_tsv_data(
-    tsv_file: str,
-    channel_mappings: List[Dict],
-    campaign: str,
-    bucket_name: str,
-    table_name: str,
-) -> Tuple[List[Any], Dict[str, Any]]:
-    """
-    Parse les données en utilisant le parser adapté au format détecté
-    dans le header du fichier.
-
-    Signature conservée pour compatibilité avec les tests.
-    """
-    with open(tsv_file, "r", encoding="utf-8") as f:
-        _line1 = f.readline().strip().split("\t")
-        line2 = f.readline().strip().split("\t")
-
-    file_format = line2[0]
-    parser = TSVParserFactory.get_parser(file_format)
-    return parser.parse_data(tsv_file, channel_mappings, campaign, bucket_name, table_name)
-
-
-# ---------------------------------------------------------------------------
-# Parsing du chemin (wrappers vers fs_utils)
-# ---------------------------------------------------------------------------
-
-def extract_path_components(tsv_path: str, base_folder: str) -> Tuple[str, str, str]:
-    """
-    Wrapper vers fs_utils.extract_path_components.
-    """
-    return _extract_path_components(tsv_path, base_folder)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +94,7 @@ def process_tsv_file(
         logger.info("Processing: %s", tsv_file)
 
         # Extraction des composants de chemin
-        bucket_name, campaign_name, device_master_sn = extract_path_components(
+        bucket_name, campaign_name, device_master_sn = _extract_path_components(
             tsv_file, base_folder
         )
 
@@ -163,25 +105,26 @@ def process_tsv_file(
         # S'assure que le bucket existe
         create_bucket_if_not_exists(client, bucket_name, org)
 
-        # Header + format
-        channel_mappings, file_format = parse_tsv_header(tsv_file)
+        # Lecture rapide du header pour récupérer le format
+        with open(tsv_file, "r", encoding="utf-8") as f:
+            _line1 = f.readline().strip().split("\t")
+            line2 = f.readline().strip().split("\t")
+        file_format = line2[0]
 
         logger.info("  Bucket: %s", bucket_name)
         logger.info("  Campaign: %s", campaign_name)
         logger.info("  Master device: %s", device_master_sn)
-        logger.info("  Channels: %d", len(channel_mappings))
         logger.info("  File format: %s", file_format)
 
         # Parser adapté au format
         parser = TSVParserFactory.get_parser(file_format)
 
-        # Données + stats
-        points, stats = parser.parse_data(
+        # Parse complet (header + data) avec les bons tags
+        points, stats = parser.parse(
             tsv_file,
-            channel_mappings,
-            campaign_name,
-            bucket_name,
-            campaign_name,  # measurement = nom de campagne
+            campaign=campaign_name,
+            bucket_name=bucket_name,
+            table_name=campaign_name,  # measurement = nom de campagne
         )
 
         logger.info("  Points created: %d", len(points))
@@ -207,22 +150,7 @@ def process_tsv_file(
         return False, file_report
 
 
-# ---------------------------------------------------------------------------
-# Utilitaires fichiers / Influx (rapport JSON)
-# ---------------------------------------------------------------------------
 
-def rename_parsed_file(tsv_file: str) -> None:
-    """
-    Wrapper vers fs_utils.rename_parsed_file.
-    """
-    return _rename_parsed_file(tsv_file)
-
-
-def find_tsv_files(base_folder: str) -> List[str]:
-    """
-    Wrapper vers fs_utils.find_tsv_files.
-    """
-    return _find_tsv_files(base_folder)
 
 
 def write_run_report_to_file(report: Dict[str, Any], base_folder: str) -> None:
@@ -359,13 +287,14 @@ def main():
             }
 
             try:
-                bucket_name, campaign_name, device_master_sn = extract_path_components(
+                bucket_name, campaign_name, device_master_sn = _extract_path_components(
                     tsv_file, base_folder
                 )
                 file_report["bucket"] = bucket_name
                 file_report["campaign"] = campaign_name
                 file_report["device_master_sn"] = device_master_sn
 
+                # Lecture du header pour récupérer format + mappings
                 channel_mappings, file_format = parse_tsv_header(tsv_file)
                 logger.info("  Bucket: %s", bucket_name)
                 logger.info("  Campaign: %s", campaign_name)
@@ -375,12 +304,11 @@ def main():
 
                 parser_impl = TSVParserFactory.get_parser(file_format)
 
-                _, stats = parser_impl.parse_data(
+                _, stats = parser_impl.parse(
                     tsv_file,
-                    channel_mappings,
-                    campaign_name,
-                    bucket_name,
-                    campaign_name,
+                    campaign=campaign_name,
+                    bucket_name=bucket_name,
+                    table_name=campaign_name,
                 )
 
                 file_report["nb_rows"] = stats.get("nb_rows", 0)

@@ -10,7 +10,12 @@ import pytest
 # On importe le module à tester
 import tsv_parser
 import influx_utils
-
+from core import parse_tsv_data, parse_tsv_header
+from fs_utils import (
+    extract_path_components as _extract_path_components,
+    rename_parsed_file as _rename_parsed_file,
+    find_tsv_files as _find_tsv_files,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -91,10 +96,10 @@ def test_parse_tsv_data_creates_points(monkeypatch, tmp_path):
     """
     tsv_file = write_tmp_tsv(tmp_path, content)
 
-    mappings, _ = tsv_parser.parse_tsv_header(str(tsv_file))
+    mappings, _ = parse_tsv_header(str(tsv_file))
 
     # On appelle parse_tsv_data
-    points, stats = tsv_parser.parse_tsv_data(
+    points, stats = parse_tsv_data(
         str(tsv_file),
         mappings,
         campaign="campaign1",
@@ -142,12 +147,12 @@ def test_parse_tsv_data_invalid_timestamp_is_skipped(tmp_path, caplog):
     03/08/25 03:30:00\t243.00
     """
     tsv_file = write_tmp_tsv(tmp_path, content)
-    mappings, _ = tsv_parser.parse_tsv_header(str(tsv_file))
+    mappings, _ = parse_tsv_header(str(tsv_file))
 
     # On capture les logs au niveau WARNING
     caplog.set_level("WARNING", logger="tsv_parser")
 
-    points, stats = tsv_parser.parse_tsv_data(
+    points, stats = parse_tsv_data(
         str(tsv_file),
         mappings,
         campaign="campaign1",
@@ -175,11 +180,11 @@ def test_parse_tsv_data_invalid_value_is_skipped(tmp_path, caplog):
     03/08/25 03:20:00\tNOT_A_NUMBER
     """
     tsv_file = write_tmp_tsv(tmp_path, content)
-    mappings, _ = tsv_parser.parse_tsv_header(str(tsv_file))
+    mappings, _ = parse_tsv_header(str(tsv_file))
 
     caplog.set_level("WARNING", logger="tsv_parser")
 
-    points, stats = tsv_parser.parse_tsv_data(
+    points, stats = parse_tsv_data(
         str(tsv_file),
         mappings,
         campaign="campaign1",
@@ -235,7 +240,7 @@ def test_full_file_parsing_all_columns():
         assert 1 <= m["column_idx"] < len(line1)
 
     # 2) Data : on parse toutes les lignes
-    points, stats = tsv_parser.parse_tsv_data(
+    points, stats = parse_tsv_data(
         str(tsv_path),
         mappings,
         campaign="campaign1",
@@ -281,7 +286,7 @@ def test_extract_path_components_ok():
     base_folder = "/srv/powerview/data"
     tsv_path = "/srv/powerview/data/company1/campaign1/02001084/T302_251012_031720.tsv"
 
-    bucket, campaign, device = tsv_parser.extract_path_components(tsv_path, base_folder)
+    bucket, campaign, device = _extract_path_components(tsv_path, base_folder)
 
     assert bucket == "company1"
     assert campaign == "campaign1"
@@ -296,7 +301,7 @@ def test_extract_path_components_invalid_path():
     tsv_path = "/srv/powerview/data/company1/file.tsv"
 
     with pytest.raises(ValueError):
-        tsv_parser.extract_path_components(tsv_path, base_folder)
+        _extract_path_components(tsv_path, base_folder)
 
 
 # ---------------------------------------------------------------------------

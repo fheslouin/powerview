@@ -23,6 +23,14 @@ class BaseTSVParser:
     Chaque implémentation gère un format de fichier spécifique.
     """
 
+    @classmethod
+    def build_channel_mappings(cls, line1, line2):
+        """
+        Doit être implémentée par les sous-classes :
+        construit les mappings de canaux à partir des deux lignes de header.
+        """
+        raise NotImplementedError
+
     def parse_header(self, tsv_file: str) -> Tuple[List[Dict], str]:
         """
         Parse les deux premières lignes du fichier TSV pour extraire
@@ -49,6 +57,7 @@ class BaseTSVParser:
     ) -> Tuple[List[Point], Dict[str, Any]]:
         """
         Parse les lignes de données TSV et crée les Points InfluxDB.
+        Implémentation par défaut, réutilisée par les sous-classes.
         """
         df = pd.read_csv(tsv_file, sep="\t", skiprows=2, header=None)
 
@@ -135,6 +144,28 @@ class BaseTSVParser:
 
         return points, stats
 
+    def parse(
+        self,
+        tsv_file: str,
+        campaign: str,
+        bucket_name: str,
+        table_name: str,
+    ) -> Tuple[List[Point], Dict[str, Any]]:
+        """
+        Parse complet : header + data.
+
+        - lit les 2 premières lignes
+        - construit les mappings via build_channel_mappings
+        - appelle parse_data avec les paramètres fournis.
+        """
+        with open(tsv_file, "r", encoding="utf-8") as f:
+            line1 = f.readline().strip().split("\t")
+            line2 = f.readline().strip().split("\t")
+
+        # file_format = line2[0]  # non utilisé ici, mais cohérent avec l'API
+        channel_mappings, _ = self.build_channel_mappings(line1, line2)
+
+        return self.parse_data(tsv_file, channel_mappings, campaign, bucket_name, table_name)
 
 
 class MV_T302_V002_Parser(BaseTSVParser):
@@ -193,9 +224,6 @@ class MV_T302_V002_Parser(BaseTSVParser):
         return channel_mappings, device_master_sn
 
 
-
-
-
 class TSVParserFactory:
     """
     Factory retournant le parser adapté à un FileFormat.
@@ -220,3 +248,54 @@ class TSVParserFactory:
         if parser_cls is None:
             raise ValueError(f"Aucun parser enregistré pour le format : {file_format}")
         return parser_cls()
+
+
+# ---------------------------------------------------------------------------
+# Parsing du header (utilisé par les tests)
+# ---------------------------------------------------------------------------
+
+def parse_tsv_header(tsv_file: str) -> Tuple[List[Dict], str]:
+    """
+    Lit les deux premières lignes du fichier, détecte le format et
+    délègue la construction des mappings au parser adapté.
+
+    Retourne:
+        (channel_mappings, file_format)
+    """
+    with open(tsv_file, "r", encoding="utf-8") as f:
+        line1 = f.readline().strip().split("\t")  # SN devices
+        line2 = f.readline().strip().split("\t")  # format + nom canal + unité
+
+    file_format = line2[0]
+    parser = TSVParserFactory.get_parser(file_format)
+
+    if hasattr(parser, "build_channel_mappings"):
+        channel_mappings, _ = parser.build_channel_mappings(line1, line2)
+    else:
+        # Fallback générique : on laisse le parser relire le fichier
+        channel_mappings, _ = parser.parse_header(tsv_file)
+
+    return channel_mappings, file_format
+
+
+def parse_tsv_data(
+    tsv_file: str,
+    channel_mappings: List[Dict],
+    campaign: str,
+    bucket_name: str,
+    table_name: str,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    """
+    Parse les données en utilisant le parser adapté au format détecté
+    dans le header du fichier.
+
+    Signature conservée pour compatibilité avec les tests.
+    """
+    with open(tsv_file, "r", encoding="utf-8") as f:
+        _line1 = f.readline().strip().split("\t")
+        line2 = f.readline().strip().split("\t")
+
+    file_format = line2[0]
+    parser = TSVParserFactory.get_parser(file_format)
+    return parser.parse_data(tsv_file, channel_mappings, campaign, bucket_name, table_name)
+
