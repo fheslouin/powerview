@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
 
@@ -29,6 +29,7 @@ from influx_utils import (
     create_bucket_if_not_exists,
     write_points,
     write_run_summary_to_influx,
+    count_points_for_file,
 )
 
 # Load environment variables from .env file
@@ -86,6 +87,10 @@ def process_tsv_file(
         "nb_invalid_timestamps": 0,
         "nb_invalid_values": 0,
         "channels": {},
+        "nb_points_expected": None,
+        "nb_points_in_influx": None,
+        "time_start": None,
+        "time_end": None,
     }
 
     try:
@@ -137,6 +142,73 @@ def process_tsv_file(
         # Écriture Influx
         write_points(client, bucket_name, org, points)
 
+        # Vérification optionnelle : compter les points dans Influx pour ce fichier
+        try:
+            expected = len(points)
+            file_name = Path(tsv_file).name
+
+            # Récupère les timestamps des points
+            times: List[str] = []
+            for p in points:
+                t = p.time
+                if t is None:
+                    continue
+                if isinstance(t, str):
+                    times.append(t)
+                else:
+                    # datetime -> ISO 8601
+                    times.append(t.isoformat())
+
+            if times:
+                start_time = min(times)
+                end_time = max(times)
+
+                actual = count_points_for_file(
+                    client=client,
+                    org=org,
+                    bucket=bucket_name,
+                    campaign=campaign_name,
+                    device_master_sn=device_master_sn,
+                    file_name=file_name,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+
+                file_report["nb_points_expected"] = expected
+                file_report["nb_points_in_influx"] = actual
+                file_report["time_start"] = start_time
+                file_report["time_end"] = end_time
+
+                if actual >= expected:
+                    logger.info(
+                        "  ✓ Vérification Influx OK: %d points attendus, %d trouvés (>=) "
+                        "pour le fichier %s sur [%s ; %s]",
+                        expected,
+                        actual,
+                        file_name,
+                        start_time,
+                        end_time,
+                    )
+                else:
+                    logger.warning(
+                        "  ⚠ Vérification Influx INCOMPLETE: %d points attendus, %d trouvés "
+                        "pour le fichier %s sur [%s ; %s]",
+                        expected,
+                        actual,
+                        file_name,
+                        start_time,
+                        end_time,
+                    )
+            else:
+                logger.warning(
+                    "Impossible de vérifier les points dans InfluxDB pour %s : "
+                    "aucun timestamp trouvé dans les points.",
+                    tsv_file,
+                )
+
+        except Exception as e:
+            logger.warning("Impossible de vérifier les points dans InfluxDB pour %s: %s", tsv_file, e)
+
         file_report["status"] = "success"
         return True, file_report
 
@@ -164,7 +236,7 @@ def write_run_report_to_file(report: Dict[str, Any], base_folder: str) -> None:
 
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    run_id = report.get("run_id", datetime.utcnow().isoformat())
+    run_id = report.get("run_id", datetime.now(timezone.utc).isoformat())
     safe_run_id = run_id.replace(":", "-")
     filename = f"tsv_parser_{safe_run_id}.json"
     path = reports_dir / filename
@@ -246,12 +318,12 @@ def main():
     else:
         logger.info("Mode DRY-RUN : aucune connexion à InfluxDB ne sera effectuée.")
 
-    run_id = datetime.utcnow().isoformat()
+    run_id = datetime.now(timezone.utc).isoformat()
     start_time = time.time()
 
     run_report: Dict[str, Any] = {
         "run_id": run_id,
-        "start_time": datetime.utcnow().isoformat(),
+        "start_time": datetime.now(timezone.utc).isoformat(),
         "end_time": None,
         "duration_s": None,
         "base_folder": base_folder,
@@ -283,6 +355,10 @@ def main():
                 "nb_invalid_timestamps": 0,
                 "nb_invalid_values": 0,
                 "channels": {},
+                "nb_points_expected": None,
+                "nb_points_in_influx": None,
+                "time_start": None,
+                "time_end": None,
             }
 
             try:
@@ -354,7 +430,7 @@ def main():
     logger.info("=" * 70)
 
     end_time = time.time()
-    run_report["end_time"] = datetime.utcnow().isoformat()
+    run_report["end_time"] = datetime.now(timezone.utc).isoformat()
     run_report["duration_s"] = end_time - start_time
     run_report["nb_files_success"] = successful
     run_report["nb_files_failed"] = failed

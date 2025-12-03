@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -80,6 +81,8 @@ class BaseTSVParser:
                 "max": None,
             }
 
+        file_name = Path(tsv_file).name
+
         for _, row in df.iterrows():
             timestamp_str = str(row[0])
 
@@ -112,6 +115,7 @@ class BaseTSVParser:
                 point = point.tag("device_sn", mapping["device_sn"])
                 point = point.tag("unit", mapping["unit"])
                 point = point.tag("campaign", campaign)
+                point = point.tag("file_name", file_name)
                 point = point.field("value", value)
                 point = point.time(int(timestamp.timestamp()), WritePrecision.S)
 
@@ -298,4 +302,3 @@ def parse_tsv_data(
     file_format = line2[0]
     parser = TSVParserFactory.get_parser(file_format)
     return parser.parse_data(tsv_file, channel_mappings, campaign, bucket_name, table_name)
-

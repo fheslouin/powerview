@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -97,7 +97,7 @@ def write_run_summary_to_influx(
             .field("nb_points_total", report.get("nb_points_total", 0))
             .field("duration_s", report.get("duration_s", 0.0))
             .field("base_folder", str(report.get("base_folder", "")))
-            .time(datetime.utcnow(), WritePrecision.S)
+            .time(datetime.now(timezone.utc), WritePrecision.S)
         )
 
         # Points par fichier (on reste léger : pas de stats détaillées par channel ici)
@@ -115,7 +115,7 @@ def write_run_summary_to_influx(
                 .field("nb_points", f.get("nb_points", 0))
                 .field("nb_invalid_timestamps", f.get("nb_invalid_timestamps", 0))
                 .field("nb_invalid_values", f.get("nb_invalid_values", 0))
-                .time(datetime.utcnow(), WritePrecision.S)
+                .time(datetime.now(timezone.utc), WritePrecision.S)
             )
             file_points.append(p_file)
 
@@ -124,3 +124,39 @@ def write_run_summary_to_influx(
         logger.info("Résumé d'exécution écrit dans InfluxDB (bucket=%s).", meta_bucket)
     except Exception as e:
         logger.warning("Impossible d'écrire le résumé d'exécution dans InfluxDB: %s", e)
+
+
+def count_points_for_file(
+    client: InfluxDBClient,
+    org: str,
+    bucket: str,
+    campaign: str,
+    device_master_sn: str,
+    file_name: str,
+    start_time: str,
+    end_time: str,
+) -> int:
+    """
+    Compte le nombre de points pour une campagne / device_master_sn / file_name
+    sur une plage temporelle explicite [start_time, end_time].
+
+    start_time / end_time doivent être des timestamps ISO 8601 (UTC de préférence).
+    On suppose que les points ont un tag 'file_name' avec le nom du fichier TSV.
+    """
+    query_api = client.query_api()
+
+    flux = f"""
+from(bucket: "{bucket}")
+  |> range(start: time(v: "{start_time}"), stop: time(v: "{end_time}"))
+  |> filter(fn: (r) => r._measurement == "{campaign}")
+  |> filter(fn: (r) => r.device_master_sn == "{device_master_sn}")
+  |> filter(fn: (r) => r.file_name == "{file_name}")
+  |> count()
+"""
+
+    tables = query_api.query(org=org, query=flux)
+    total = 0
+    for table in tables:
+        for record in table.records:
+            total += int(record.get_value())
+    return total
