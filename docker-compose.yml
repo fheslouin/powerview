@@ -1,42 +1,66 @@
+version: "3.9"
+
 services:
   influxdb2:
     image: influxdb:2
     container_name: influxdb
-    restart: always
+    restart: unless-stopped
     hostname: influxdb
     ports:
-      - 8086:8086
+      - "8086:8086"
+    env_file:
+      - .env
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: $INFLUXDB_USERNAME
-      DOCKER_INFLUXDB_INIT_PASSWORD: $INFLUXDB_PASSWORD
-      DOCKER_INFLUXDB_INIT_ORG: $INFLUXDB_ORG
-      DOCKER_INFLUXDB_INIT_BUCKET: $INFLUXDB_BUCKET
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: $INFLUXDB_ADMIN_TOKEN
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN}
     volumes:
       - influxdb2-data:/var/lib/influxdb2
       - influxdb2-config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping", "-host", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   grafana:
     image: grafana/grafana-enterprise
-    user: "1000"
-    depends_on:
-      - influxdb2
     container_name: grafana
-    restart: always
+    user: "1000"
+    restart: unless-stopped
+    depends_on:
+      influxdb2:
+        condition: service_healthy
     ports:
-      - 8088:3000
+      - "8088:3000"
+    env_file:
+      - .env
     environment:
+      # ID du plugin = "influxdb-adecwatts-datasource" (plugin.json)
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "influxdb-adecwatts-datasource"
       INFLUXDB_DATA_INDEX_VERSION: "tsi1"
-      GF_INSTALL_PLUGINS: "grafana-clock-panel,\
-                          grafana-influxdb-08-datasource,\
-                          grafana-kairosdb-datasource,\
-                          grafana-piechart-panel,\
-                          volkovlabs-form-panel, \
-                          grafana-simple-json-datasource"
-      GF_SECURITY_ADMIN_PASSWORD: $GRAFANA_PASSWORD
+      GF_INSTALL_PLUGINS: >
+        grafana-clock-panel,
+        grafana-influxdb-08-datasource,
+        grafana-kairosdb-datasource,
+        grafana-piechart-panel,
+        volkovlabs-form-panel,
+        grafana-simple-json-datasource
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      # Paramètres utiles derrière le reverse proxy Caddy
+      GF_SERVER_ROOT_URL: "%(protocol)s://powerview.adecwatts.fr/"
+      GF_SERVER_DOMAIN: "powerview.adecwatts.fr"
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana-plugins:/tmp/grafana-plugins
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 volumes:
   influxdb2-data:
