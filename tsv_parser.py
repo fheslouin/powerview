@@ -62,6 +62,46 @@ def setup_logging() -> None:
 # Traitement d'un fichier
 # ---------------------------------------------------------------------------
 
+def _compute_time_range_from_tsv(tsv_file: str) -> Tuple[str, str]:
+    """
+    Relit le fichier TSV (colonne 0) pour calculer la plage temporelle
+    min / max des timestamps valides, et retourne deux timestamps ISO 8601 (UTC).
+
+    On réutilise la même logique de parsing de dates que dans core.py.
+    """
+    times: List[datetime] = []
+
+    with open(tsv_file, "r", encoding="utf-8") as f:
+        # sauter les 2 lignes de header
+        next(f, None)
+        next(f, None)
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if not parts:
+                continue
+            timestamp_str = str(parts[0])
+            try:
+                ts = datetime.strptime(timestamp_str, "%m/%d/%y %H:%M:%S")
+            except ValueError:
+                try:
+                    ts = datetime.strptime(timestamp_str, "%d/%m/%y %H:%M:%S")
+                except ValueError:
+                    continue
+            # on considère que c'est du temps local, on le convertit en UTC naïf
+            times.append(ts)
+
+    if not times:
+        raise ValueError("Aucun timestamp valide trouvé dans le fichier pour calculer la plage temporelle")
+
+    start_dt = min(times)
+    end_dt = max(times)
+
+    # On les rend explicites en UTC
+    start_iso = start_dt.replace(tzinfo=timezone.utc).isoformat()
+    end_iso = end_dt.replace(tzinfo=timezone.utc).isoformat()
+    return start_iso, end_iso
+
+
 def process_tsv_file(
     tsv_file: str,
     base_folder: str,
@@ -147,73 +187,44 @@ def process_tsv_file(
             expected = len(points)
             file_name = Path(tsv_file).name
 
-            # Récupère les timestamps des points
-            times: List[str] = []
-            for p in points:
-                # p.time est une MÉTHODE dans influxdb_client, il faut l'appeler
-                t = p.time()
-                if t is None:
-                    continue
-                if isinstance(t, str):
-                    times.append(t)
-                elif isinstance(t, datetime):
-                    # datetime -> ISO 8601
-                    times.append(t.isoformat())
-                else:
-                    # timestamp numérique (secondes) -> datetime UTC -> ISO 8601
-                    try:
-                        ts = float(t)
-                        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                        times.append(dt.isoformat())
-                    except Exception:
-                        # On ignore les formats qu'on ne sait pas convertir proprement
-                        continue
+            # Calcule la plage temporelle à partir du TSV (colonne 0)
+            start_time_iso, end_time_iso = _compute_time_range_from_tsv(tsv_file)
 
-            if times:
-                start_time = min(times)
-                end_time = max(times)
+            actual = count_points_for_file(
+                client=client,
+                org=org,
+                bucket=bucket_name,
+                campaign=campaign_name,
+                device_master_sn=device_master_sn,
+                file_name=file_name,
+                start_time=start_time_iso,
+                end_time=end_time_iso,
+            )
 
-                actual = count_points_for_file(
-                    client=client,
-                    org=org,
-                    bucket=bucket_name,
-                    campaign=campaign_name,
-                    device_master_sn=device_master_sn,
-                    file_name=file_name,
-                    start_time=start_time,
-                    end_time=end_time,
+            file_report["nb_points_expected"] = expected
+            file_report["nb_points_in_influx"] = actual
+            file_report["time_start"] = start_time_iso
+            file_report["time_end"] = end_time_iso
+
+            if actual >= expected:
+                logger.info(
+                    "  ✓ Vérification Influx OK: %d points attendus, %d trouvés (>=) "
+                    "pour le fichier %s sur [%s ; %s]",
+                    expected,
+                    actual,
+                    file_name,
+                    start_time_iso,
+                    end_time_iso,
                 )
-
-                file_report["nb_points_expected"] = expected
-                file_report["nb_points_in_influx"] = actual
-                file_report["time_start"] = start_time
-                file_report["time_end"] = end_time
-
-                if actual >= expected:
-                    logger.info(
-                        "  ✓ Vérification Influx OK: %d points attendus, %d trouvés (>=) "
-                        "pour le fichier %s sur [%s ; %s]",
-                        expected,
-                        actual,
-                        file_name,
-                        start_time,
-                        end_time,
-                    )
-                else:
-                    logger.warning(
-                        "  ⚠ Vérification Influx INCOMPLETE: %d points attendus, %d trouvés "
-                        "pour le fichier %s sur [%s ; %s]",
-                        expected,
-                        actual,
-                        file_name,
-                        start_time,
-                        end_time,
-                    )
             else:
                 logger.warning(
-                    "Impossible de vérifier les points dans InfluxDB pour %s : "
-                    "aucun timestamp trouvé dans les points.",
-                    tsv_file,
+                    "  ⚠ Vérification Influx INCOMPLETE: %d points attendus, %d trouvés "
+                    "pour le fichier %s sur [%s ; %s]",
+                    expected,
+                    actual,
+                    file_name,
+                    start_time_iso,
+                    end_time_iso,
                 )
 
         except Exception as e:
