@@ -150,14 +150,24 @@ def process_tsv_file(
             # Récupère les timestamps des points
             times: List[str] = []
             for p in points:
-                t = p.time
+                # p.time est une MÉTHODE dans influxdb_client, il faut l'appeler
+                t = p.time()
                 if t is None:
                     continue
                 if isinstance(t, str):
                     times.append(t)
-                else:
+                elif isinstance(t, datetime):
                     # datetime -> ISO 8601
                     times.append(t.isoformat())
+                else:
+                    # timestamp numérique (secondes) -> datetime UTC -> ISO 8601
+                    try:
+                        ts = float(t)
+                        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                        times.append(dt.isoformat())
+                    except Exception:
+                        # On ignore les formats qu'on ne sait pas convertir proprement
+                        continue
 
             if times:
                 start_time = min(times)
