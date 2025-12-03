@@ -147,6 +147,7 @@ def count_points_for_file(
 
     flux = f"""
 from(bucket: "{bucket}")
+  |> range(start: 0)
   |> filter(fn: (r) => r._measurement == "{campaign}")
   |> filter(fn: (r) => r.device_master_sn == "{device_master_sn}")
   |> filter(fn: (r) => r.file_name == "{file_name}")
