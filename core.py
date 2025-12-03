@@ -79,6 +79,12 @@ class BaseTSVParser:
                 "sum": 0.0,
                 "min": None,
                 "max": None,
+                # Ajout des tags demandés dans le rapport par channel
+                "device_master_sn": mapping["device_master_sn"],
+                "column_idx": mapping["column_idx"],
+                "channel_type": mapping["channel_type"],
+                "channel_number": mapping["channel_number"],
+                "device_sn": mapping["device_sn"],
             }
 
         file_name = Path(tsv_file).name

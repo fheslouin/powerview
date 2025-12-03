@@ -1,6 +1,6 @@
 __title__ = "powerview"
 __description__ = "Data loading"
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 __author__ = "Adecwatts"
 __author_email__ = "support@adecwatts.com"
 __maintainer__ = "Adecwatts"
