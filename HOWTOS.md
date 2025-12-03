@@ -11,24 +11,19 @@ ssh ubuntu@37.59.124.77
 cd /srv
 ```
 
-(adapte l’utilisateur / l’IP si besoin)
 
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-### 2. Sauvegarder l’ancienne version (optionnel mais conseillé)
+### 2. Sauvegarder l’ancienne version (optionnel)
 
-Si tu as déjà un dossier /srv/powerview existant :
+Si déjà un dossier /srv/powerview existant :
 
 ```bash
 sudo systemctl stop sftpgo || true   # pour éviter des hooks pendant la mise à jour
 mv /srv/powerview /srv/powerview_backup_$(date +%Y%m%d_%H%M%S)
 ```
 
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
 ### 3. Récupérer la nouvelle version du code
 
-Si ton dépôt est sur GitHub / GitLab, par ex :
 
 ```bash
 cd /srv
@@ -37,10 +32,6 @@ git clone https://github.com/fheslouin/powerview.git
 cd powerview
 ```
 
-Si tu as modifié le code localement, tu peux aussi faire un git pull dans l’ancien dossier au lieu de re-cloner, mais comme on vient de renommer l’ancien, le plus simple
-est de repartir propre.
-
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 4. Créer / recréer l’environnement virtuel Python
 
@@ -51,7 +42,6 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 5. Mettre à jour le fichier .env
 
@@ -78,13 +68,9 @@ nano .env
  • INFLUXDB_ORG
  • éventuellement TSV_META_BUCKET, TSV_LOG_LEVEL…
 
-Tu peux reprendre les valeurs de ton ancien .env dans /srv/powerview_backup_.../.env si tu l’avais.
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 6. (Si besoin) Redéployer Grafana / InfluxDB
 
-Si tu utilises Podman comme dans le README :
 
 ```bash
 cd /srv/powerview
@@ -94,7 +80,6 @@ podman compose up -d
 
 Vérifie que Grafana et InfluxDB répondent (via Caddy ou directement sur les ports internes).
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 7. Vérifier / mettre à jour la config SFTPGo
 
@@ -117,7 +102,6 @@ Puis :
 sudo systemctl restart sftpgo
 ```
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 8. Droits sur /srv
 
@@ -129,10 +113,6 @@ sudo apt install -y acl
 sudo setfacl -d -R -m u:ubuntu:rwx /srv/
 sudo chown -R sftpgo:sftpgo /srv/
 ```
-
-(adapte ubuntu à ton utilisateur SSH si besoin)
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 9. Tester le parseur manuellement
 
@@ -170,7 +150,6 @@ Après succès :
  • un rapport JSON doit apparaître dans …/logs/reports/ (par défaut /srv/sftpgo/logs/reports si TSV_REPORT_DIR n’est pas défini),
  • un résumé doit être écrit dans le bucket meta (par défaut powerview_meta).
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 10. Tester l’intégration SFTPGo + Ansible + Grafana
 
@@ -204,7 +183,6 @@ Vérifie ensuite dans Grafana :
  • la datasource influxdb_company1,
  • un dashboard avec le titre campaign_test.
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ### 11. Vérifier les logs
 
