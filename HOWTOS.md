@@ -60,13 +60,13 @@ nano .env
 
 À minima :
 
- • GRAFANA_URL
- • GRAFANA_USERNAME
- • GRAFANA_PASSWORD
- • INFLUXDB_HOST
- • INFLUXDB_ADMIN_TOKEN
- • INFLUXDB_ORG
- • éventuellement TSV_META_BUCKET, TSV_LOG_LEVEL…
+-  GRAFANA_URL
+-  GRAFANA_USERNAME
+-  GRAFANA_PASSWORD
+-  INFLUXDB_HOST
+-  INFLUXDB_ADMIN_TOKEN
+-  INFLUXDB_ORG
+-  éventuellement TSV_META_BUCKET, TSV_LOG_LEVEL…
 
 
 ### 6. (Si besoin) Redéployer Grafana / InfluxDB
@@ -145,10 +145,10 @@ python3 tsv_parser.py \
 
 Après succès :
 
- • le fichier doit être déplacé dans .../parsed/,
- • les points doivent être écrits dans InfluxDB (bucket company1),
- • un rapport JSON doit apparaître dans …/logs/reports/ (par défaut /srv/sftpgo/logs/reports si TSV_REPORT_DIR n’est pas défini),
- • un résumé doit être écrit dans le bucket meta (par défaut powerview_meta).
+ -  le fichier doit être déplacé dans .../parsed/,
+ -  les points doivent être écrits dans InfluxDB (bucket company1),
+ -  un rapport JSON doit apparaître dans …/logs/reports/ (par défaut /srv/sftpgo/logs/reports si TSV_REPORT_DIR n’est pas défini),
+ -  un résumé doit être écrit dans le bucket meta (par défaut powerview_meta).
 
 
 ### 10. Tester l’intégration SFTPGo + Ansible + Grafana
@@ -178,14 +178,14 @@ ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml \
 
 Vérifie ensuite dans Grafana :
 
- • la team company1,
- • le dossier company1,
- • la datasource influxdb_company1,
- • un dashboard avec le titre campaign_test.
+ -  la team company1,
+ -  le dossier company1,
+ -  la datasource influxdb_company1,
+ -  un dashboard avec le titre campaign_test.
 
 
 ### 11. Vérifier les logs
 
- • Logs SFTPGo : journalctl -u sftpgo -f
- • Logs du hook : /srv/sftpgo/logs/uploads.log
- • Logs du parseur (dans ce même fichier, car on-upload.sh y redirige stdout/stderr)
+ -  Logs SFTPGo : journalctl -u sftpgo -f
+ -  Logs du hook : /srv/sftpgo/logs/uploads.log
+ -  Logs du parseur (dans ce même fichier, car on-upload.sh y redirige stdout/stderr)
