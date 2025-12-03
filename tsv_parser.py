@@ -209,6 +209,10 @@ def main():
     )
     args = parser.parse_args()
 
+    # Validation : --tsvFile nécessite obligatoirement --dataFolder
+    if args.tsvFile and not args.dataFolder:
+        parser.error("--dataFolder est obligatoire quand --tsvFile est utilisé")
+
     tsv_files: List[str] = []
     base_folder: str = ""
 

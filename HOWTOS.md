@@ -27,7 +27,7 @@ mv /srv/powerview /srv/powerview_backup_$(date +%Y%m%d_%H%M%S)
 
 ```bash
 cd /srv
-git clone https://github.com/fheslouin/powerview.git
+git clone https://github.com/fheslouin/powerview.git 
 # ou ton propre remote si tu as un fork
 cd powerview
 ```
