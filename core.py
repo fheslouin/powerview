@@ -73,18 +73,18 @@ class BaseTSVParser:
         for mapping in channel_mappings:
             cid = mapping["channel_id"]
             channel_stats[cid] = {
+                "column_idx": mapping["column_idx"],
+                "device_master_sn": mapping["device_master_sn"],
+                "device_sn": mapping["device_sn"],
+                "channel_type": mapping["channel_type"],
+                "channel_number": mapping["channel_number"],
                 "channel_name": mapping["channel_name"],
                 "unit": mapping["unit"],
                 "nb_points": 0,
                 "sum": 0.0,
                 "min": None,
                 "max": None,
-                # Ajout des tags demandés dans le rapport par channel
-                "device_master_sn": mapping["device_master_sn"],
-                "column_idx": mapping["column_idx"],
-                "channel_type": mapping["channel_type"],
-                "channel_number": mapping["channel_number"],
-                "device_sn": mapping["device_sn"],
+                "mean": None,
             }
 
         file_name = Path(tsv_file).name
