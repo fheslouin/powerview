@@ -57,10 +57,6 @@ def setup_logging() -> None:
     )
 
 
-
-
-
-
 # ---------------------------------------------------------------------------
 # Traitement d'un fichier
 # ---------------------------------------------------------------------------
@@ -150,9 +146,6 @@ def process_tsv_file(
         file_report["status"] = "error"
         file_report["error"] = msg
         return False, file_report
-
-
-
 
 
 def write_run_report_to_file(report: Dict[str, Any], base_folder: str) -> None:
@@ -380,6 +373,9 @@ def main():
             logger.warning("Impossible d'écrire le rapport JSON: %s", e)
 
         try:
+            # S'assure que le bucket meta existe avant d'écrire le résumé
+            meta_bucket = os.getenv("TSV_META_BUCKET", "powerview_meta")
+            create_bucket_if_not_exists(client, meta_bucket, org)
             write_run_summary_to_influx(client, org, run_report)
         except Exception as e:
             logger.warning("Impossible d'écrire le résumé d'exécution dans InfluxDB: %s", e)
