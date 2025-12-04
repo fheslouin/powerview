@@ -112,7 +112,7 @@ class BaseTSVParser:
                     nb_invalid_values += 1
                     continue
 
-                point = Point("campaign")
+                point = Point(campaign)
                 point = point.field(f"{mapping["channel_id"]}_{mapping["unit"]}", value)
                 point = point.time(int(timestamp.timestamp()), WritePrecision.S)
                 point = point.tag("channel_type", mapping["channel_type"])
