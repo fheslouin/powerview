@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import pandas as pd
 from influxdb_client import Point, WritePrecision
@@ -76,7 +76,7 @@ class BaseTSVParser:
                 "column_idx": mapping["column_idx"],
                 "device_master_sn": mapping["device_master_sn"],
                 "device_sn": mapping["device_sn"],
-                "channel_type": mapping["channel_type"],
+                "device_type": mapping["device_type"],
                 "channel_number": mapping["channel_number"],
                 "channel_name": mapping["channel_name"],
                 "unit": mapping["unit"],
@@ -112,16 +112,19 @@ class BaseTSVParser:
                     nb_invalid_values += 1
                     continue
 
-                point = Point(campaign)
+                point = Point("electrical")
                 point = point.field(f"{mapping["channel_id"]}_{mapping["unit"]}", value)
                 point = point.time(int(timestamp.timestamp()), WritePrecision.S)
-                point = point.tag("channel_type", mapping["channel_type"])
-                point = point.tag("channel_id", mapping["channel_id"])
-                point = point.tag("channel_unit", mapping["unit"])
-                point = point.tag("channel_number", str(mapping["channel_number"]))
-                point = point.tag("channel_name", mapping["channel_name"])
-                point = point.tag("device_master_sn", mapping["device_master_sn"])
-                point = point.tag("device_sn", mapping["device_sn"])
+                point = point.tag("campaign", campaign)                            # campagne de mesure
+                point = point.tag("channel_id", mapping["channel_id"])             # M02001171_Ch1_M020011201
+                point = point.tag("channel_unit", mapping["unit"])                 # V, W, Wa
+                point = point.tag("channel_label", mapping["channel_label"])       # "frigo"
+                point = point.tag("channel_name", mapping["channel_name"])         # Ui ou Chi
+                point = point.tag("device", mapping["device"])                     # MV2
+                point = point.tag("device_type", mapping["device_type"])           # master/slave
+                point = point.tag("device_subtype", mapping["device_subtype"])     # null/tri/mono
+                point = point.tag("device_master_sn", mapping["device_master_sn"]) # 02001171
+                point = point.tag("device_sn", mapping["device_sn"])               # 020011201
                 point = point.tag("file_name", file_name)
                 points.append(point)
 
@@ -190,6 +193,7 @@ class MV_T302_V002_Parser(BaseTSVParser):
         line2 : liste "format / nom canal + unité" (2ème ligne)
         """
         device_master_sn = line1[0]
+        device_subtype = "tri" if line2[3].startswith("Ph") else "mono"
 
         channel_mappings: List[Dict[str, Any]] = []
         device_channel_counter: Dict[str, int] = {}
@@ -198,11 +202,27 @@ class MV_T302_V002_Parser(BaseTSVParser):
             device_sn = line1[col_idx]
             channel_info = line2[col_idx]
 
+            device_type = "master" if device_sn == device_master_sn else "slave"
+            device_type_prefix = "M" if device_sn == device_master_sn else "S"
+
             # Compteur de canaux par device
             if device_sn not in device_channel_counter:
                 device_channel_counter[device_sn] = 0
             device_channel_counter[device_sn] += 1
             channel_number = device_channel_counter[device_sn]
+            if device_type == "master":
+                if device_subtype == "tri":
+                    if channel_number <= 3:
+                        channel_label = f"U{channel_number}"
+                    else:
+                        channel_label = f"Ch{channel_number-3}"
+                else:
+                    if channel_number <= 1:
+                        channel_label = f"U{channel_number}"
+                    else:
+                        channel_label = f"Ch{channel_number-1}"
+            else:
+                channel_label = f"Ch{channel_number}"
 
             # Découpage "nom canal" / "unité"
             parts = channel_info.rsplit(" ", 1)
@@ -212,18 +232,18 @@ class MV_T302_V002_Parser(BaseTSVParser):
                 channel_name = channel_info
                 unit = ""
 
-            channel_type = "master" if device_sn == device_master_sn else "slave"
-            channel_type_prefix = "M" if device_sn == device_master_sn else "S"
-            channel_id = f"{channel_type_prefix}{device_sn}_Ch{channel_number}_M{device_master_sn}"
+            channel_id = f"{device_type_prefix}{device_sn}_{channel_label}_M{device_master_sn}"
 
             channel_mappings.append(
                 {
                     "column_idx": col_idx,
                     "channel_id": channel_id,
-                    "channel_type": channel_type,
-                    "channel_number": channel_number,
+                    "device_type": device_type,
+                    "device_subtype": device_subtype if device_type == "master" else None,
+                    "channel_label": channel_label,
                     "channel_name": channel_name.strip(),
                     "device_master_sn": device_master_sn,
+                    "device": "MV2",
                     "device_sn": device_sn,
                     "unit": unit.strip(),
                 }
