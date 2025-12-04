@@ -112,19 +112,17 @@ class BaseTSVParser:
                     nb_invalid_values += 1
                     continue
 
-                point = Point(table_name)
-                point = point.tag("channel_id", mapping["channel_id"])
+                point = Point("campaign")
+                point = point.field(f"{mapping["channel_id"]}_{mapping["unit"]}", value)
+                point = point.time(int(timestamp.timestamp()), WritePrecision.S)
                 point = point.tag("channel_type", mapping["channel_type"])
+                point = point.tag("channel_id", mapping["channel_id"])
+                point = point.tag("channel_unit", mapping["unit"])
                 point = point.tag("channel_number", str(mapping["channel_number"]))
                 point = point.tag("channel_name", mapping["channel_name"])
                 point = point.tag("device_master_sn", mapping["device_master_sn"])
                 point = point.tag("device_sn", mapping["device_sn"])
-                point = point.tag("unit", mapping["unit"])
-                point = point.tag("campaign", campaign)
                 point = point.tag("file_name", file_name)
-                point = point.field("value", value)
-                point = point.time(int(timestamp.timestamp()), WritePrecision.S)
-
                 points.append(point)
 
                 cid = mapping["channel_id"]
