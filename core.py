@@ -77,7 +77,7 @@ class BaseTSVParser:
                 "device_master_sn": mapping["device_master_sn"],
                 "device_sn": mapping["device_sn"],
                 "device_type": mapping["device_type"],
-                "channel_number": mapping["channel_number"],
+                "channel_label": mapping["channel_label"],
                 "channel_name": mapping["channel_name"],
                 "unit": mapping["unit"],
                 "nb_points": 0,
