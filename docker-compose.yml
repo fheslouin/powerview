@@ -55,7 +55,8 @@ services:
       GF_SERVER_DOMAIN: "powerview.adecwatts.fr"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana-plugins:/tmp/grafana-plugins
+      # Plugins custom : on monte le dossier où on a copié le plugin
+      - /srv/grafana-plugins/influxdb-adecwatts-datasource:/var/lib/grafana/plugins/influxdb-adecwatts-datasource
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
       interval: 30s
