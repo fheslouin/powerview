@@ -11,6 +11,8 @@
     influxdb_admin_token: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ADMIN_TOKEN') }}"
     influxdb_username: "{{ lookup('ansible.builtin.env', 'INFLUXDB_USERNAME') }}"
     influxdb_password: "{{ lookup('ansible.builtin.env', 'INFLUXDB_PASSWORD') }}"
+    influxdb_org: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ORG') }}"
+    influxdb_host: "{{ lookup('ansible.builtin.env', 'INFLUXDB_HOST') }}"
 
     json_file: "/srv/powerview/dashboard_master.json"
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
@@ -49,26 +51,48 @@
       when: not created_team.status | default(omit)== 409
         and not dashboard_created.stat.exists
 
-    - name: Create InfluxDB datasource
+    - name: Ensure InfluxDB bucket exists for company (idempotent, via Python parser)
+      ansible.builtin.debug:
+        msg: >
+          Le bucket InfluxDB '{{ company_name }}' doit déjà exister
+          (créé automatiquement par tsv_parser.py via create_bucket_if_not_exists).
+
+    - name: Create or get InfluxDB token for bucket
+      ansible.builtin.command: >
+        python3 /srv/powerview/manage_influx_tokens.py
+        --bucket {{ company_name }}
+      register: influx_token_cmd
+      changed_when: false
+      when: not dashboard_created.stat.exists
+
+    - name: Fail if token creation failed
+      ansible.builtin.fail:
+        msg: "Impossible de récupérer un token InfluxDB pour le bucket {{ company_name }}"
+      when:
+        - not dashboard_created.stat.exists
+        - influx_token_cmd.rc != 0
+
+    - name: Create InfluxDB datasource (plugin influxdb-adecwatts-datasource)
       community.grafana.grafana_datasource:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
-        ds_type: influxdb
-        ds_url: "http://influxdb:8086"
+        ds_type: influxdb-adecwatts-datasource
+        ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         basic_auth_user: "{{ influxdb_username }}"
         basic_auth_password: "{{ influxdb_password }}"
         additional_json_data:
           version: "Flux"
-          organization: "powerview"
-          defaultBucket: "{{company_name}}"
+          organization: "{{ influxdb_org }}"
+          defaultBucket: "{{ company_name }}"
           tlsSkipVerify: false
         additional_secure_json_data:
-          token: "{{ influxdb_admin_token }}"
+          token: "{{ influx_token_cmd.stdout | trim }}"
         state: present
         validate_certs: false
       register: created_datasource
+      when: not dashboard_created.stat.exists
 
     - name: Export master dashboard as JSON file
       community.grafana.grafana_dashboard:
@@ -84,7 +108,17 @@
 
     - name: Modify Grafana dashboard JSON
       ansible.builtin.shell: |
-        jq 'del(.dashboard.version) | del(.dashboard.id) | del(.dashboard.uid) | del(.meta) | .dashboard.title = "{{ campaign_name }}" | (..|objects|select(.type=="influxdb" and has("uid"))|.uid) = "{{ created_datasource.datasource.uid }}"' "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
+        jq 'del(.dashboard.version)
+            | del(.dashboard.id)
+            | del(.dashboard.uid)
+            | del(.meta)
+            | .dashboard.title = "{{ campaign_name }}"
+            # Met à jour type + uid pour toutes les datasources Influx
+            | (..|objects
+               | select(has("type") and has("uid") and .type=="influxdb")
+               | .type = "influxdb-adecwatts-datasource"
+               | .uid = "{{ created_datasource.datasource.uid }}" )' \
+           "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
       args:
         executable: /bin/bash
       when: not dashboard_created.stat.exists
@@ -159,6 +193,6 @@
           - "Grafana Resources Created Successfully!"
           - "============================================"
           - "Team: {{ company_name }}"
-          - "Datasource: influxdb_{{ company_name }}"
-          - "Dashboard: {{ company_name }}"
+          - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket {{ company_name }})"
+          - "Dashboard: {{ campaign_name }}"
           - "Folder: {{ company_name }}"

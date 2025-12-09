@@ -23,7 +23,7 @@
   "panels": [
     {
       "datasource": {
-        "type": "influxdb",
+        "type": "influxdb-adecwatts-datasource",
         "uid": "{{ datasource_uid }}"
       },
       "fieldConfig": {
@@ -114,7 +114,7 @@
         {
           "dataset": "iox",
           "datasource": {
-            "type": "influxdb",
+            "type": "influxdb-adecwatts-datasource",
             "uid": "{{ datasource_uid }}"
           },
           "editorMode": "code",
@@ -157,7 +157,7 @@
           "value": "$__all"
         },
         "datasource": {
-          "type": "influxdb",
+          "type": "influxdb-adecwatts-datasource",
           "uid": "{{ datasource_uid }}"
         },
         "definition": "SELECT DISTINCT\n  CONCAT('Device: ', device, ' - Ch: ', channel_name) AS field_label,\n  unit\nFROM\n  ${__dashboard.name}\nWHERE\n  time >= $__timeFrom\n  AND time <= $__timeTo\n  AND unit = 'W'\nORDER BY\n  field_label\n",
