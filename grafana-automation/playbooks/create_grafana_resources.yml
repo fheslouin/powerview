@@ -17,14 +17,12 @@
 
     data_path: "/srv/sftpgo/data"
 
-    # Template Jinja pour les dashboards (campagne + overview)
+    # Template Jinja pour le dashboard de campagne
     dashboard_template: "{{ playbook_dir }}/../templates/dashboard.json.j2"
     campaign_dashboard_json: "/srv/powerview/dashboard_campaign.json"
-    overview_dashboard_json: "/srv/powerview/dashboard_overview.json"
 
-    # UIDs déterministes pour l'idempotence des dashboards
+    # UID déterministe pour l'idempotence du dashboard de campagne
     campaign_dashboard_uid: "powerview_{{ company_name }}_{{ campaign_name }}"
-    overview_dashboard_uid: "powerview_overview_{{ company_name }}"
 
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
     grafana_auth_headers: >-
@@ -220,7 +218,7 @@
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
         ds_type: influxdb
-        ds_url: "{{ influxdb_url | default('http://influxdb:8086') }}"
+        ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         access: proxy
         is_default: false
         additional_json_data:
@@ -272,7 +270,7 @@
       when: not dashboard_created.stat.exists
 
     # ------------------------------------------------------------------
-    # Dashboards (campagne + overview) via template Jinja
+    # Dashboard de campagne via template Jinja (UN SEUL dashboard)
     # ------------------------------------------------------------------
 
     - name: Ensure dashboard template exists
@@ -319,33 +317,6 @@
       register: imported_dashboard
       when: not dashboard_created.stat.exists
 
-    - name: Render overview dashboard JSON from template
-      ansible.builtin.template:
-        src: "{{ dashboard_template }}"
-        dest: "{{ overview_dashboard_json }}"
-        mode: "0644"
-      vars:
-        company_name: "{{ company_name }}"
-        campaign_name: "Overview {{ company_name }}"
-        datasource_uid: "{{ created_datasource.datasource.uid }}"
-      when:
-        - not dashboard_created.stat.exists
-        - dashboard_template_stat.stat.exists
-
-    - name: Import overview dashboard for company (idempotent via UID fixe)
-      community.grafana.grafana_dashboard:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        state: present
-        path: "{{ overview_dashboard_json }}"
-        folder: "{{ company_name }}"
-        uid: "{{ overview_dashboard_uid }}"
-        overwrite: true
-        validate_certs: false
-      register: imported_overview
-      when: not dashboard_created.stat.exists
-
     # ------------------------------------------------------------------
     # Permissions via team (créée ou existante)
     # ------------------------------------------------------------------
@@ -383,13 +354,10 @@
     # Nettoyage + marqueur .dashboard.created
     # ------------------------------------------------------------------
 
-    - name: Clean up temporary dashboard files
+    - name: Clean up temporary dashboard file
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ campaign_dashboard_json }}"
         state: absent
-      loop:
-        - "{{ campaign_dashboard_json }}"
-        - "{{ overview_dashboard_json }}"
       when: not dashboard_created.stat.exists
 
     - name: Ensure campaign directory exists
@@ -418,6 +386,5 @@
           - "Team: {{ company_name }} (id={{ grafana_team_id }})"
           - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
           - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
-          - "Overview dashboard: Overview {{ company_name }} (uid={{ overview_dashboard_uid }})"
           - "Folder: {{ company_name }}"
       when: not dashboard_created.stat.exists
