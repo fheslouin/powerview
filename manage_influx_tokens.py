@@ -84,6 +84,7 @@ def _run_influx_cmd(args: List[str]) -> Union[Dict[str, Any], List[Any]]:
             text=True,
         )
     except subprocess.CalledProcessError as e:
+        # On remonte l'erreur brute pour que l'appelant puisse décider quoi faire
         raise RuntimeError(
             f"Commande influx échouée: {' '.join(cmd)}\n"
             f"stdout: {e.stdout}\n"
@@ -105,15 +106,63 @@ def _run_influx_cmd(args: List[str]) -> Union[Dict[str, Any], List[Any]]:
 # Logique métier via CLI
 # ---------------------------------------------------------------------------
 
+def create_bucket_cli(bucket_name: str, org: str) -> str:
+    """
+    Crée un bucket via la CLI `influx bucket create` et retourne son ID.
+
+    Gère les deux formats possibles :
+      - {"id": "...", "name": "...", ...}
+      - [{"id": "...", "name": "...", ...}]
+    """
+    data = _run_influx_cmd([
+        "bucket", "create",
+        "--name", bucket_name,
+        "--org", org,
+    ])
+
+    # Certaines versions renvoient un objet, d'autres une liste avec un seul élément
+    if isinstance(data, list):
+        if not data:
+            raise RuntimeError(
+                f"Réponse vide de la CLI influx pour la création du bucket {bucket_name}"
+            )
+        data = data[0]
+
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"Format de réponse inattendu pour 'influx bucket create': {type(data)}"
+        )
+
+    bid = data.get("id")
+    if not bid:
+        raise RuntimeError(
+            f"ID de bucket non retourné par la CLI influx pour le bucket {bucket_name} "
+            f"(réponse: {data})"
+        )
+    return bid
+
+
 def find_bucket_id_cli(bucket_name: str, org: str) -> str:
     """
     Retourne l'ID du bucket pour un nom donné, via la CLI `influx bucket find`.
+
+    Si le bucket n'existe pas, il est créé automatiquement via `influx bucket create`.
 
     Gère les deux formats possibles :
       - {"buckets": [ {...}, ... ]}
       - [ {...}, ... ]
     """
-    data = _run_influx_cmd(["bucket", "find", "--name", bucket_name, "--org", org])
+    try:
+        data = _run_influx_cmd(["bucket", "find", "--name", bucket_name, "--org", org])
+    except RuntimeError as e:
+        # Si la CLI renvoie explicitement un 404 "bucket not found", on crée le bucket
+        msg = str(e)
+        if "failed to find bucket by name" in msg or "bucket \"{}\" not found".format(bucket_name) in msg:
+            # Création du bucket puis nouvelle tentative de find
+            bucket_id = create_bucket_cli(bucket_name, org)
+            return bucket_id
+        # Autre erreur -> on remonte
+        raise
 
     buckets: List[Dict[str, Any]] = []
 
@@ -134,7 +183,10 @@ def find_bucket_id_cli(bucket_name: str, org: str) -> str:
             if bid:
                 return bid
 
-    raise RuntimeError(f"Bucket InfluxDB introuvable (via CLI) : {bucket_name}")
+    # Si on arrive ici, le bucket n'a pas été trouvé dans la réponse JSON.
+    # On tente de le créer (cas où la CLI n'a pas levé d'erreur mais n'a rien retourné).
+    bucket_id = create_bucket_cli(bucket_name, org)
+    return bucket_id
 
 
 def find_existing_token_for_bucket_cli(bucket_name: str, org: str) -> Optional[str]:
@@ -239,7 +291,7 @@ def main() -> None:
         # 1) Vérifie que la CLI influx est dispo
         _ensure_influx_cli_available()
 
-        # 2) Trouver l'ID du bucket via la CLI
+        # 2) Trouver (ou créer) l'ID du bucket via la CLI
         bucket_id = find_bucket_id_cli(bucket_name, org)
 
         # 3) Voir si un token existe déjà pour ce bucket
