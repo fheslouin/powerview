@@ -20,8 +20,8 @@
     data_path: "/srv/sftpgo/data"
 
     # Fichier temporaire pour le dashboard overview
-    # IMPORTANT : chemin ABSOLU, pour éviter les problèmes de répertoire courant
-    overview_template: "/srv/powerview/grafana-automation/templates/powerview-overview.json"
+    # IMPORTANT : chemin basé sur le répertoire du playbook pour éviter les problèmes de déploiement
+    overview_template: "{{ playbook_dir }}/../templates/powerview-overview.json"
     overview_json_file: "/srv/powerview/dashboard_overview.json"
 
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
@@ -310,6 +310,23 @@
     # Dashboard OVERVIEW par client (à partir du template powerview-overview.json)
     # ------------------------------------------------------------------
 
+    - name: Ensure overview template exists
+      ansible.builtin.stat:
+        path: "{{ overview_template }}"
+      register: overview_template_stat
+      when: not dashboard_created.stat.exists
+
+    - name: Fail if overview template is missing
+      ansible.builtin.fail:
+        msg: >
+          Le template de dashboard overview est introuvable :
+          {{ overview_template }}
+          Assure-toi que le fichier 'grafana-automation/templates/powerview-overview.json'
+          est bien présent sur le serveur (par ex. sous /srv/powerview).
+      when:
+        - not dashboard_created.stat.exists
+        - not overview_template_stat.stat.exists
+
     - name: Build overview dashboard JSON from template
       ansible.builtin.shell: |
         set -euo pipefail
@@ -344,7 +361,9 @@
         ' "{{ overview_template }}" > "{{ overview_json_file }}"
       args:
         executable: /bin/bash
-      when: not dashboard_created.stat.exists
+      when:
+        - not dashboard_created.stat.exists
+        - overview_template_stat.stat.exists
 
     - name: Import overview dashboard for company
       community.grafana.grafana_dashboard:
@@ -396,6 +415,13 @@
     # ------------------------------------------------------------------
     # Nettoyage + marqueur .dashboard.created
     # ------------------------------------------------------------------
+
+    - name: Ensure campaign directory exists for dashboard marker
+      ansible.builtin.file:
+        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}"
+        state: directory
+        mode: "0755"
+      when: not dashboard_created.stat.exists
 
     - name: Clean up temporary dashboard file
       ansible.builtin.file:
