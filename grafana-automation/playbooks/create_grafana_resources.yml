@@ -454,3 +454,4 @@
           - "Dashboard: {{ campaign_name }}"
           - "Overview dashboard: Overview {{ company_name }}"
           - "Folder: {{ company_name }}"
+      when: not dashboard_created.stat.exists
