@@ -24,6 +24,11 @@
     # UID déterministe pour l'idempotence du dashboard de campagne
     campaign_dashboard_uid: "powerview_{{ company_name }}_{{ campaign_name }}"
 
+    # Variables pour l'utilisateur "admin" de la team (surchageables via --extra-vars)
+    company_admin_login: "{{ company_admin_login_override | default('admin_' ~ company_name, true) }}"
+    company_admin_email: "{{ company_admin_email_override | default('admin_' ~ company_name ~ '@example.com', true) }}"
+    company_admin_password: "{{ company_admin_password_override | default('ChangeMe123!', true) }}"
+
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
     grafana_auth_headers: >-
       {{
@@ -155,6 +160,37 @@
         msg:
           - "Team utilisée pour company_name='{{ company_name }}'"
           - "team_id={{ grafana_team_id }}"
+      when: not dashboard_created.stat.exists
+
+    # ------------------------------------------------------------------
+    # Création d'un utilisateur dédié à la team (non admin global)
+    # ------------------------------------------------------------------
+
+    - name: Créer / assurer l'existence de l'utilisateur Grafana pour la company
+      community.grafana.grafana_user:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ company_name }} Admin"
+        login: "{{ company_admin_login }}"
+        email: "{{ company_admin_email }}"
+        password: "{{ company_admin_password }}"
+        is_admin: false
+        state: present
+        validate_certs: false
+      register: company_user
+      when: not dashboard_created.stat.exists
+
+    - name: Ajouter l'utilisateur à la team (membre de la team uniquement)
+      community.grafana.grafana_team:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ company_name }}"
+        members:
+          - "{{ company_admin_login }}"
+        state: present
+        validate_certs: false
       when: not dashboard_created.stat.exists
 
     # ------------------------------------------------------------------
@@ -412,4 +448,5 @@
           - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
           - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
           - "Folder: {{ company_name }}"
+          - "User (team admin): login='{{ company_admin_login }}', email='{{ company_admin_email }}'"
       when: not dashboard_created.stat.exists
