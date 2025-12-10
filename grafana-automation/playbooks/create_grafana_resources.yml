@@ -416,13 +416,6 @@
     # Nettoyage + marqueur .dashboard.created
     # ------------------------------------------------------------------
 
-    - name: Ensure campaign directory exists for dashboard marker
-      ansible.builtin.file:
-        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}"
-        state: directory
-        mode: "0755"
-      when: not dashboard_created.stat.exists
-
     - name: Clean up temporary dashboard file
       ansible.builtin.file:
         path: "{{ item }}"
