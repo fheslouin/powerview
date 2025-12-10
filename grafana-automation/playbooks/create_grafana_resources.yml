@@ -172,9 +172,9 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "{{ company_name }} Admin"
-        login: "{{ company_name }}_admin"
-        email: "contact@adecwatts.fr"
-        password: "changeme"
+        login: "{{ company_admin_login }}"
+        email: "{{ company_admin_email }}"
+        password: "{{ company_admin_password }}"
         is_admin: false
         state: present
         validate_certs: false
@@ -188,7 +188,7 @@
         url_password: "{{ grafana_password }}"
         name: "{{ company_name }}"
         members:
-          - "{{ company_name }}_admin"
+          - "{{ company_admin_login }}"
         state: present
         validate_certs: false
       when: not dashboard_created.stat.exists
