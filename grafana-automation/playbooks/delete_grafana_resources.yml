@@ -8,6 +8,13 @@
     grafana_url: "{{ lookup('env', 'GRAFANA_URL') }}"
     grafana_username: "{{ lookup('env', 'GRAFANA_USERNAME') }}"
     grafana_password: "{{ lookup('env', 'GRAFANA_PASSWORD') }}"
+    grafana_api_token: "{{ lookup('env', 'GRAFANA_API_TOKEN') | default('', true) }}"
+
+    # Headers d'auth pour les appels REST (URI) : on force le token Admin
+    grafana_auth_headers: >-
+      {{
+        {'Authorization': 'Bearer ' ~ grafana_api_token}
+      }}
 
   vars_prompt:
     - name: user_name
@@ -24,6 +31,34 @@
       default: "no"
 
   tasks:
+    - name: Validate Grafana username/password are set
+      ansible.builtin.assert:
+        that:
+          - grafana_username is defined
+          - grafana_password is defined
+          - grafana_username | length > 0
+          - grafana_password | length > 0
+        fail_msg: >
+          GRAFANA_USERNAME et GRAFANA_PASSWORD doivent être définis dans l'environnement (.env)
+          et correspondre à un compte Grafana avec rôle Admin (pour les modules community.grafana.*).
+
+    - name: Validate Grafana API token is set
+      ansible.builtin.assert:
+        that:
+          - grafana_api_token is defined
+          - grafana_api_token | length > 0
+        fail_msg: >
+          GRAFANA_API_TOKEN doit être défini dans l'environnement (.env) et
+          correspondre à un token Grafana avec rôle Admin (utilisé pour les appels REST /api/*).
+
+    - name: Debug Grafana connection settings
+      ansible.builtin.debug:
+        msg:
+          - "GRAFANA_URL={{ grafana_url }}"
+          - "GRAFANA_USERNAME={{ grafana_username }}"
+          - "GRAFANA_PASSWORD défini: {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
+          - "GRAFANA_API_TOKEN défini: {{ grafana_api_token | length > 0 }}"
+
     - name: Abort if not confirmed
       ansible.builtin.fail:
         msg: "Deletion cancelled by user"
@@ -33,9 +68,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_name }}"
         method: GET
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         status_code: [200, 404]
         validate_certs: false
       register: user_info
@@ -44,9 +77,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/teams/search?name={{ company_name }}"
         method: GET
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         status_code: [200, 404]
         validate_certs: false
       register: team_info
@@ -55,9 +86,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/folders"
         method: GET
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         status_code: 200
         validate_certs: false
       register: folders_list
@@ -70,9 +99,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/search?folderIds={{ folders_list.json | selectattr('title', 'equalto', company_name) | map(attribute='id') | first }}&type=dash-db"
         method: GET
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         validate_certs: false
       register: dashboards_in_folder
       when: folder_uid | length > 0
@@ -81,9 +108,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ item.uid }}"
         method: DELETE
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         status_code: [200, 404]
         validate_certs: false
       loop: "{{ dashboards_in_folder.json | default([]) }}"
@@ -114,7 +139,7 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "{{ company_name }}"
-        email: "{{ user_info.json.email }}"
+        email: "{{ user_info.json.email | default('') }}"
         state: absent
         validate_certs: false
       when: team_info.json.teams is defined and team_info.json.teams | length > 0
