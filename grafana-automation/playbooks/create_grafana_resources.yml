@@ -187,6 +187,7 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "{{ company_name }}"
+        email: "{{ company_admin_email }}"
         members:
           - "{{ company_admin_login }}"
         state: present
