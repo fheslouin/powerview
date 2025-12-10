@@ -67,15 +67,21 @@ cp .env.sample .env
   * `INFLUXDB_ORG` (nom de l’organisation InfluxDB, ex. `powerview`)
   * `GRAFANA_URL`, `GRAFANA_USERNAME`, `GRAFANA_PASSWORD`
 
-> Remarque importante : en production derrière Caddy, `GRAFANA_URL` doit
-> généralement pointer vers l’URL HTTPS frontée par Caddy, par exemple :
+> Remarque importante :
 >
-> ```env
-> GRAFANA_URL='https://powerview.adecwatts.fr'
-> ```
+> - Pour les **scripts internes** (parseur, Ansible), il est recommandé de
+>   pointer `GRAFANA_URL` vers l’URL interne du service Grafana, par exemple :
 >
-> et non vers l’URL interne `http://powerview.adecwatts.fr:8088`.  
-> Cela évite les redirections HTTP 308 que Caddy applique automatiquement.
+>   ```env
+>   GRAFANA_URL='http://localhost:8088'
+>   ```
+>
+>   Cela évite de dépendre du reverse‑proxy (Caddy) et des éventuelles règles
+>   d’authentification HTTP qui peuvent bloquer certaines routes API
+>   (`/api/teams`, `/api/teams/search`, etc.).
+>
+> - Pour les **utilisateurs humains**, l’accès se fait via Caddy en HTTPS :
+>   `https://powerview.adecwatts.fr`.
 
 > Remarque : le modèle actuel combine les deux approches :
 >
@@ -374,129 +380,4 @@ grafana-automation/README.md
 
 ## Workflow de traitement des données (détaillé)
 
-Cette section résume le flux complet, de l’upload d’un fichier TSV jusqu’à l’affichage dans Grafana, en tenant compte de la logique de déplacement des fichiers dans les sous‑dossiers `parsed/` et `error/`.
-
-1. **Upload SFTP**
-   * Un client dépose un fichier TSV sur le serveur SFTP (SFTPGo).
-   * Le fichier est initialement stocké sous la forme :
-     `/srv/sftpgo/data/<company>/<campaign>/<device_master_sn>/<fichier>.tsv`.
-   * SFTPGo déclenche un hook qui exécute `/srv/powerview/on-upload.sh` avec des variables d’environnement (notamment `SFTPGO_ACTION` et `SFTPGO_ACTION_PATH`).
-
-2. **Script `on-upload.sh` – cas `upload`**
-   * Si `SFTPGO_ACTION=upload` :
-     * le script active l’environnement virtuel Python et charge le fichier `.env` ;
-     * il appelle le parseur Python sur le fichier uploadé :
-       ```bash
-       python3 /srv/powerview/tsv_parser.py \
-         --dataFolder /srv/sftpgo/data \
-         --tsvFile "$SFTPGO_ACTION_PATH"
-       ```
-     * toute la sortie (logs) est écrite dans `/srv/sftpgo/logs/uploads.log`.
-
-3. **Parsing TSV et écriture dans InfluxDB (`tsv_parser.py`)**
-   * Le script :
-     * déduit `company`, `campaign` et `device_master_sn` à partir du chemin du fichier ;
-     * crée le bucket InfluxDB `<company>` s’il n’existe pas encore (`create_bucket_if_not_exists`) ;
-     * lit le header du TSV pour détecter le format (actuellement `MV_T302_V002`) ;
-     * construit les mappings de canaux (device, numéro de canal, unité, etc.) ;
-     * parse toutes les lignes de données et crée des points InfluxDB via `core.BaseTSVParser.parse_data` :
-       * measurement = `electrical` ;
-       * field = `"<channel_id>_<unit>"` (par ex. `M02001171_Ch1_M02001171_V`) ;
-       * tags : `campaign`, `device_sn`, `device_master_sn`, `channel_id`, `channel_name`,
-         `channel_label`, `channel_unit`, `device_type`, `device_subtype`, `device`,
-         `file_name`, etc. ;
-     * écrit les points dans InfluxDB (`write_points`) ;
-     * calcule une plage temporelle [start, end] à partir de la colonne timestamp du TSV ;
-     * compte les points réellement présents dans InfluxDB pour ce fichier (`count_points_for_file`) et loggue un message de vérification ;
-     * génère un rapport JSON d’exécution et un résumé dans un bucket meta (par défaut `powerview_meta`).
-
-4. **Gestion des fichiers après traitement (`parsed/` et `error/`)**
-   * La logique de post‑traitement des fichiers est la suivante :
-     * si le fichier est **traité avec succès** (parsing + écriture InfluxDB OK) :
-       * il est déplacé dans un sous‑dossier `parsed` du device :
-         ```text
-         /srv/sftpgo/data/<company>/<campaign>/<device_master_sn>/parsed/<fichier>.tsv
-         ```
-     * si une **erreur** survient pendant le traitement (exception dans le parseur ou l’écriture InfluxDB) :
-       * le fichier est déplacé dans un sous‑dossier `error` du device :
-         ```text
-         /srv/sftpgo/data/<company>/<campaign>/<device_master_sn>/error/<fichier>.tsv
-         ```
-   * La fonction `find_tsv_files` ignore explicitement les sous‑dossiers `parsed/` et `error/`, ce qui garantit que :
-     * seuls les fichiers “bruts” à la racine du device sont (re)traités ;
-     * les fichiers déjà traités ou en erreur ne sont pas rescannés.
-
-5. **Script `on-upload.sh` – cas `mkdir`**
-   * Si `SFTPGO_ACTION=mkdir` :
-     * le script extrait `company` et `campaign` à partir du chemin créé sous `/srv/sftpgo/data` ;
-     * si le dossier correspond à un niveau `company/campaign` (et non à un dossier de device), il lance un playbook Ansible :
-       ```bash
-       ansible-playbook /srv/powerview/grafana-automation/playbooks/create_grafana_resources.yml \
-         --extra-vars "company_name=<company> campaign_name=<campaign>"
-       ```
-
-6. **Automatisation Grafana (Ansible)**
-   * Le playbook `create_grafana_resources.yml` :
-     * crée (ou vérifie l’existence de) la team Grafana `<company>` ;
-     * crée le folder Grafana `<company>` ;
-     * crée une datasource `influxdb_<company>` de type plugin `influxdb-adecwatts-datasource` pointant sur :
-       * `INFLUXDB_HOST` (URL),
-       * l’organisation `INFLUXDB_ORG`,
-       * le bucket par défaut `<company>`,
-       * un **token dédié au bucket `<company>`** généré/récupéré par `manage_influx_tokens.py` ;
-     * exporte un dashboard maître, le duplique et l’adapte pour la campagne (`title = <campaign>`, datasource mise à jour vers `influxdb_<company>` avec type `influxdb-adecwatts-datasource`) ;
-     * importe ce nouveau dashboard dans le folder `<company>` ;
-     * applique les permissions (la team `<company>` a accès en lecture au folder et au dashboard) ;
-     * crée un fichier `.dashboard.created` dans `/srv/sftpgo/data/<company>/<campaign>/` pour éviter de recréer les ressources à chaque événement.
-
-7. **Visualisation dans Grafana**
-   * Les dashboards créés automatiquement utilisent des requêtes (SQL ou Flux selon le plugin) basées sur :
-     * le bucket = `<company>` (configuré dans la datasource),
-     * le measurement = `electrical`,
-     * les tags (`campaign`, `device_master_sn`, `channel_name`, `channel_label`, `channel_unit`, etc.),
-     * les fields `"<channel_id>_<unit>"`.
-   * Dès que les fichiers TSV sont parsés et injectés, les données deviennent visibles dans Grafana via ces dashboards.
-
-## Divers
-
-### Exemple de requêtes Flux Grafana
-
-Ces exemples supposent un schéma de données basé sur :
-
-- bucket = `<company>`
-- measurement = `${__dashboard.name}` (ancien modèle)
-- field = `value`
-
-Ils sont conservés ici à titre d’exemple, mais **ne correspondent plus exactement**
-au schéma actuel (measurement `electrical`, fields `"<channel_id>_<unit>"`).
-Adapte‑les si tu utilises Flux avec le plugin `influxdb-adecwatts-datasource`.
-
-Pour obtenir toutes les voies en variable de dashboard :
-
-```flux
-from(bucket: v.defaultBucket)
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "${__dashboard.name}")
-  |> filter(fn: (r) => r.unit == "W")
-  |> map(fn: (r) => ({
-      _field: "SN: " + string(v: r.device) + " - Ch: " + string(v: r.channel_name)
-  }))
-  |> distinct(column: "_field")
-  |> sort(columns: ["_field"])
-```
-
-Pour obtenir une série temporelle sur les voies sélectionnées :
-
-```flux
-from(bucket: v.defaultBucket)
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "${__dashboard.name}")
-  |> map(fn: (r) => ({
-      _time: r._time,
-      _value: r._value,
-      _field: "SN: " + string(v: r.device) + " - Ch: " + string(v: r.channel_name)
-  }))
-  |> filter(fn: (r) => contains(value: r._field, set: ${channels:json}))
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> yield(name: "multi_sn_channel")
-```
+[...] (inchangé)

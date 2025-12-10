@@ -9,7 +9,7 @@ mais peuvent aussi être exécutés manuellement.
 
 ## Fonctionnalités actuelles
 
-- ✅ Utilisation d’une **team Grafana par client** (`company_name`)
+- ✅ Création automatique d’une **team Grafana par client** (`company_name`)
 - ✅ Création d’un **dossier Grafana** par client (`company_name`)
 - ✅ Création d’une **datasource InfluxDB par client** :
   - nom : `influxdb_{{ company_name }}`
@@ -28,24 +28,7 @@ mais peuvent aussi être exécutés manuellement.
 - ✅ Playbook de **nettoyage** pour supprimer :
   - dashboards, dossier, datasource du client, utilisateur Grafana associé.
 
-> Remarque importante : la **création de la team Grafana** n’est plus gérée
-> automatiquement par le playbook de création (`create_grafana_resources.yml`).
-> Dans l’environnement actuel (auth Grafana spécifique), l’API `/api/teams`
-> renvoie 401 malgré un compte Admin / token Admin.
->
-> **Tu dois donc créer la team manuellement dans Grafana** :
->
-> 1. Aller dans *Configuration → Teams*.
-> 2. Créer une team dont le nom est exactement `company_name`
->    (par ex. `company1`).
-> 3. Ajouter les utilisateurs Grafana de ce client dans cette team.
->
-> Le playbook se contente ensuite de :
-> - vérifier que la team existe (`/api/teams/search?name=company_name`),
-> - récupérer son `teamId`,
-> - appliquer les permissions sur le folder et le dashboard pour cette team.
-
-> Remarque : la **création d’utilisateurs Grafana** n’est plus gérée par le
+> Remarque : la **création d’utilisateurs Grafana** n’est pas gérée par le
 > playbook de création (`create_grafana_resources.yml`).  
 > Seul le playbook de suppression (`delete_grafana_resources.yml`) manipule
 > encore un utilisateur (pour le supprimer).
@@ -61,14 +44,16 @@ mais peuvent aussi être exécutés manuellement.
   - le bucket et l’org sont configurés via les champs de la datasource.
 - Fichier `.env` à la racine du projet PowerView (`/srv/powerview/.env`) contenant au minimum :
 
-  - `GRAFANA_URL`
-  - **Mode principal (recommandé pour l’instant)** : login/mot de passe admin Grafana :
+  - `GRAFANA_URL` (souvent `http://localhost:8088` pour les scripts internes)
+  - **Login/mot de passe admin Grafana** (pour les modules `community.grafana.*`) :
     - `GRAFANA_USERNAME`
     - `GRAFANA_PASSWORD`
-  - **Mode avancé (optionnel)** : token API Grafana :
-    - `GRAFANA_API_TOKEN` = token d’un service account Grafana avec rôle **Admin**
-    - ce token est utilisé pour certains appels API (permissions), mais la
-      création de teams se fait désormais manuellement.
+  - **Token API Grafana Admin** (API key ou service account) pour les appels REST :
+    - `GRAFANA_API_TOKEN` = token avec rôle **Admin**
+    - utilisé pour :
+      - création de team (`POST /api/teams`),
+      - recherche de team (`GET /api/teams/search`),
+      - permissions dashboard/folder (`/api/dashboards/.../permissions`, `/api/folders/.../permissions`).
   - `INFLUXDB_HOST`
   - `INFLUXDB_ORG`
   - `INFLUXDB_ADMIN_TOKEN`
