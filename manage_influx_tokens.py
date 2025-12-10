@@ -45,8 +45,8 @@ def get_or_create_token_for_bucket(
     Retourne un token existant pour ce bucket (si trouvé via la description),
     sinon crée un nouveau token avec droits read/write sur ce bucket.
 
-    Implémentation sans import des classes de domaine, en utilisant
-    uniquement des dicts, compatible avec influxdb-client 1.49.0.
+    Implémentation compatible avec influxdb-client 1.49.0 en utilisant
+    un simple dict pour l'authorization (pas les classes Authorization/Permission/Resource).
     """
     auth_api = client.authorizations_api()
 
@@ -55,39 +55,35 @@ def get_or_create_token_for_bucket(
     # 1. Cherche un token existant avec cette description
     existing = auth_api.find_authorizations()
     for auth in existing or []:
-        # Dans 1.49.0, auth est un objet Authorization, mais on peut l'interroger
         desc = getattr(auth, "description", None)
         token = getattr(auth, "token", None)
         if desc == description and token:
             return token
 
     # 2. Crée un nouveau token avec permissions RW sur ce bucket
-    permissions = [
-        {
-            "action": "read",
-            "resource": {
-                "type": "buckets",
-                "id": bucket_id,
-                "orgID": org_id,
-            },
-        },
-        {
-            "action": "write",
-            "resource": {
-                "type": "buckets",
-                "id": bucket_id,
-                "orgID": org_id,
-            },
-        },
-    ]
-
     body = {
         "orgID": org_id,
-        "permissions": permissions,
         "description": description,
+        "permissions": [
+            {
+                "action": "read",
+                "resource": {
+                    "type": "buckets",
+                    "id": bucket_id,
+                    "orgID": org_id,
+                },
+            },
+            {
+                "action": "write",
+                "resource": {
+                    "type": "buckets",
+                    "id": bucket_id,
+                    "orgID": org_id,
+                },
+            },
+        ],
     }
 
-    # Dans 1.49.0, create_authorization accepte un dict "authorization"
     new_auth = auth_api.create_authorization(authorization=body)
 
     token = getattr(new_auth, "token", None)
