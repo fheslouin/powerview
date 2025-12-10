@@ -32,7 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Optional
+from typing import Optional, Union, List, Dict, Any
 
 from dotenv import load_dotenv
 
@@ -62,10 +62,16 @@ def _ensure_influx_cli_available() -> None:
         )
 
 
-def _run_influx_cmd(args: list[str]) -> dict:
+def _run_influx_cmd(args: List[str]) -> Union[Dict[str, Any], List[Any]]:
     """
     Exécute `influx ... --json` et retourne le JSON parsé.
-    Lève RuntimeError en cas d'erreur.
+
+    Selon la version de la CLI Influx, la sortie JSON peut être :
+      - un objet dict, ex: {"buckets": [...]}
+      - une liste, ex: [{"id": "...", "name": "..."}]
+
+    On retourne donc soit un dict, soit une list, et les fonctions appelantes
+    doivent gérer les deux cas.
     """
     _ensure_influx_cli_available()
 
@@ -85,12 +91,14 @@ def _run_influx_cmd(args: list[str]) -> dict:
         ) from e
 
     try:
-        return json.loads(result.stdout)
+        data = json.loads(result.stdout)
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"Réponse non JSON de la CLI influx pour la commande: {' '.join(cmd)}\n"
             f"stdout: {result.stdout}"
         ) from e
+
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -100,15 +108,32 @@ def _run_influx_cmd(args: list[str]) -> dict:
 def find_bucket_id_cli(bucket_name: str, org: str) -> str:
     """
     Retourne l'ID du bucket pour un nom donné, via la CLI `influx bucket find`.
+
+    Gère les deux formats possibles :
+      - {"buckets": [ {...}, ... ]}
+      - [ {...}, ... ]
     """
     data = _run_influx_cmd(["bucket", "find", "--name", bucket_name, "--org", org])
-    # Format typique: {"buckets": [ { "id": "...", "name": "company1", ... } ]}
-    buckets = data.get("buckets") or []
+
+    buckets: List[Dict[str, Any]] = []
+
+    if isinstance(data, dict):
+        buckets = data.get("buckets") or []
+    elif isinstance(data, list):
+        buckets = data
+    else:
+        raise RuntimeError(
+            f"Format de réponse inattendu pour 'influx bucket find': {type(data)}"
+        )
+
     for b in buckets:
+        if not isinstance(b, dict):
+            continue
         if b.get("name") == bucket_name:
             bid = b.get("id")
             if bid:
                 return bid
+
     raise RuntimeError(f"Bucket InfluxDB introuvable (via CLI) : {bucket_name}")
 
 
@@ -119,13 +144,29 @@ def find_existing_token_for_bucket_cli(bucket_name: str, org: str) -> Optional[s
     Description utilisée :
         powerview_token_for_bucket_<bucket_name>
 
+    Gère les deux formats possibles :
+      - {"authorizations": [ {...}, ... ]}
+      - [ {...}, ... ]
+
     Retourne le token si trouvé, sinon None.
     """
     description = f"powerview_token_for_bucket_{bucket_name}"
     data = _run_influx_cmd(["auth", "list", "--org", org])
-    # Format typique: {"authorizations": [ { "description": "...", "token": "...", ... } ]}
-    auths = data.get("authorizations") or []
+
+    auths: List[Dict[str, Any]] = []
+
+    if isinstance(data, dict):
+        auths = data.get("authorizations") or []
+    elif isinstance(data, list):
+        auths = data
+    else:
+        raise RuntimeError(
+            f"Format de réponse inattendu pour 'influx auth list': {type(data)}"
+        )
+
     for a in auths:
+        if not isinstance(a, dict):
+            continue
         if a.get("description") == description and a.get("token"):
             return a["token"]
     return None
@@ -148,7 +189,20 @@ def create_token_for_bucket_cli(bucket_id: str, bucket_name: str, org: str) -> s
         "--read-bucket", bucket_id,
         "--write-bucket", bucket_id,
     ])
-    # Format typique: {"id": "...", "token": "...", "description": "...", ...}
+
+    # Selon la version, la sortie peut être un dict ou une liste avec un seul élément
+    if isinstance(data, list):
+        if not data:
+            raise RuntimeError(
+                f"Réponse vide de la CLI influx pour la création du token du bucket {bucket_name}"
+            )
+        data = data[0]
+
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"Format de réponse inattendu pour 'influx auth create': {type(data)}"
+        )
+
     token = data.get("token")
     if not token:
         raise RuntimeError(
