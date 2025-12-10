@@ -23,9 +23,6 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
-from influxdb_client.domain.authorization import Authorization
-from influxdb_client.domain.permission import Permission
-from influxdb_client.domain.resource import Resource
 
 # Charge les variables d'environnement depuis .env (si présent)
 load_dotenv()
@@ -48,9 +45,8 @@ def get_or_create_token_for_bucket(
     Retourne un token existant pour ce bucket (si trouvé via la description),
     sinon crée un nouveau token avec droits read/write sur ce bucket.
 
-    Compatible avec influxdb-client 1.49.0 :
-    - find_authorizations() renvoie des objets Authorization
-    - create_authorization() attend un objet Authorization
+    Implémentation sans import des classes de domaine, en utilisant
+    uniquement des dicts, compatible avec influxdb-client 1.49.0.
     """
     auth_api = client.authorizations_api()
 
@@ -59,29 +55,40 @@ def get_or_create_token_for_bucket(
     # 1. Cherche un token existant avec cette description
     existing = auth_api.find_authorizations()
     for auth in existing or []:
-        # auth est un objet Authorization
+        # Dans 1.49.0, auth est un objet Authorization, mais on peut l'interroger
         desc = getattr(auth, "description", None)
         token = getattr(auth, "token", None)
         if desc == description and token:
             return token
 
     # 2. Crée un nouveau token avec permissions RW sur ce bucket
-    read_perm = Permission(
-        action="read",
-        resource=Resource(type="buckets", id=bucket_id, org_id=org_id),
-    )
-    write_perm = Permission(
-        action="write",
-        resource=Resource(type="buckets", id=bucket_id, org_id=org_id),
-    )
+    permissions = [
+        {
+            "action": "read",
+            "resource": {
+                "type": "buckets",
+                "id": bucket_id,
+                "orgID": org_id,
+            },
+        },
+        {
+            "action": "write",
+            "resource": {
+                "type": "buckets",
+                "id": bucket_id,
+                "orgID": org_id,
+            },
+        },
+    ]
 
-    auth_body = Authorization(
-        org_id=org_id,
-        permissions=[read_perm, write_perm],
-        description=description,
-    )
+    body = {
+        "orgID": org_id,
+        "permissions": permissions,
+        "description": description,
+    }
 
-    new_auth = auth_api.create_authorization(authorization=auth_body)
+    # Dans 1.49.0, create_authorization accepte un dict "authorization"
+    new_auth = auth_api.create_authorization(authorization=body)
 
     token = getattr(new_auth, "token", None)
     if not token:
