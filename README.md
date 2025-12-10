@@ -287,8 +287,9 @@ SFTPGo génère des événements à chaque upload de fichier ou création de dos
     * bucket par défaut : `<company_name>` dans InfluxDB ;
     * **token InfluxDB dédié au bucket** : généré/récupéré par `manage_influx_tokens.py`
       (`powerview_token_for_bucket_<company_name>`) et injecté dans la datasource ;
-  * exporte le dashboard maître Grafana utilisé comme référence (visible dans Grafana : Dashboard -> admin -> Master, UID `adq2j6z`) ;
-  * modifie et importe le nouveau dashboard dans le dossier de la Team (en remplaçant type + uid de la datasource par ceux de `influxdb_<company_name>`) ;
+  * rend un **template de dashboard** (`grafana-automation/templates/dashboard.json.j2`)
+    avec `company_name`, `campaign_name` et le `datasource_uid` de
+    `influxdb_<company_name>`, puis importe ce JSON comme dashboard Grafana ;
   * applique les permissions sur le dashboard et le dossier pour la Team créée.
 
 > Important : le parseur écrit actuellement les points dans un **measurement unique**
@@ -300,7 +301,7 @@ SFTPGo génère des événements à chaque upload de fichier ou création de dos
 >   `channel_name`, `device`, `device_type`, `device_subtype`,
 >   `device_master_sn`, `device_sn`, `file_name`, etc.
 >
-> Les dashboards Grafana (dashboard maître + dashboards clonés par Ansible)
+> Les dashboards Grafana (template Jinja + dashboards importés par Ansible)
 > doivent donc être construits pour ce schéma (measurement `electrical`,
 > champs nommés par canal), et non plus sur l’ancien modèle
 > “measurement = nom de campagne, field = value”.
@@ -353,16 +354,18 @@ Instance Grafana unique
                    +-- Dashboards: campaignA, campaignB, ...
 ```
 
-Les **utilisateurs Grafana** sont créés séparément (via l’UI Grafana ou un autre mécanisme), puis rattachés à la team du client :
+Les **utilisateurs Grafana** peuvent être gérés de deux façons :
 
-* tu crées par exemple `user_company1_x` dans Grafana ;
-* tu l’ajoutes comme membre de la team `company1` ;
-* il hérite alors des droits de la team sur le folder `company1` et ses dashboards.
+* soit manuellement via l’UI Grafana, puis rattachés à la team du client ;
+* soit automatiquement via le playbook de création, qui crée un utilisateur
+  `{{ company_name }} Admin` (login `admin_{{ company_name }}` par défaut) et
+  l’ajoute à la team `{{ company_name }}`.
 
 Le playbook de création (`grafana-automation/playbooks/create_grafana_resources.yml`) :
 
-* ne crée **pas** d’utilisateurs ;
-* crée/maintient uniquement : team, folder, datasource `influxdb_<company_name>` (plugin `influxdb-adecwatts-datasource`), dashboards, permissions de la team.
+* crée/maintient : team, folder, datasource `influxdb_<company_name>` (plugin `influxdb-adecwatts-datasource`), dashboards, permissions de la team ;
+* crée également un utilisateur “admin de la team” (sauf si tu surcharges les
+  variables pour utiliser un compte existant).
 
 Le playbook de suppression (`grafana-automation/playbooks/delete_grafana_resources.yml`) permet, lui, de :
 

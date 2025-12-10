@@ -18,20 +18,32 @@ mais peuvent aussi être exécutés manuellement.
   - **token utilisé : un token dédié par bucket**, créé/récupéré via
     `manage_influx_tokens.py` (`powerview_token_for_bucket_<company_name>`)
 - ✅ Création automatique d’un **dashboard par campagne** :
-  - export d’un dashboard maître existant (UID fixe),
-  - adaptation (titre = `campaign_name`, datasource remplacée par `influxdb_{{ company_name }}` avec le plugin `influxdb-adecwatts-datasource`),
-  - import dans le dossier de la team.
+  - rendu d’un template Jinja (`templates/dashboard.json.j2`) avec :
+    - `company_name`
+    - `campaign_name`
+    - `datasource_uid` de la datasource `influxdb_{{ company_name }}`
+  - import dans le dossier de la team, avec un UID déterministe
+    (`powerview_{{ company_name }}_{{ campaign_name }}`) pour l’idempotence.
 - ✅ Application des **permissions** :
   - la team a accès en lecture (viewer) au dossier et au dashboard.
 - ✅ Marquage des campagnes déjà initialisées via un fichier :
   - `data/<company_name>/<campaign_name>/.dashboard.created`
 - ✅ Playbook de **nettoyage** pour supprimer :
-  - dashboards, dossier, datasource du client, utilisateur Grafana associé.
+  - dashboards, dossier, datasource du client, team Grafana associée,
+  - et éventuellement un utilisateur Grafana donné (si tu le demandes).
+- ✅ Création d’un **utilisateur Grafana dédié par client** (playbook de création) :
+  - nom : `{{ company_name }} Admin`
+  - login par défaut : `admin_{{ company_name }}`
+  - email par défaut : `admin_{{ company_name }}@example.com`
+  - mot de passe par défaut : `ChangeMe123!` (surchageable via `--extra-vars`)
+  - l’utilisateur est ajouté comme membre de la team `{{ company_name }}`.
 
-> Remarque : la **création d’utilisateurs Grafana** n’est pas gérée par le
-> playbook de création (`create_grafana_resources.yml`).  
-> Seul le playbook de suppression (`delete_grafana_resources.yml`) manipule
-> encore un utilisateur (pour le supprimer).
+> Remarque : la création d’utilisateurs Grafana **est gérée** par le
+> playbook de création (`create_grafana_resources.yml`) via le module
+> `community.grafana.grafana_user`.  
+> Le playbook de suppression (`delete_grafana_resources.yml`) peut, lui,
+> supprimer un utilisateur donné (en plus de la team, du folder, des dashboards
+> et de la datasource).
 
 ## Prérequis
 
