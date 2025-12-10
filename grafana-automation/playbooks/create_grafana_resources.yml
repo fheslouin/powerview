@@ -211,13 +211,13 @@
       register: created_folder
       when: not dashboard_created.stat.exists
 
-    - name: Create InfluxDB datasource (plugin influxdb-adecwatts-datasource)
+    - name: Create InfluxDB datasource (créée comme influxdb, patchée ensuite en plugin custom)
       community.grafana.grafana_datasource:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
-        ds_type: influxdb-adecwatts-datasource
+        ds_type: influxdb
         ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         access: proxy
         is_default: false
@@ -243,6 +243,33 @@
         state: present
         validate_certs: false
       register: created_datasource
+      when: not dashboard_created.stat.exists
+
+    - name: Get created datasource by name
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: ds_get
+      when: not dashboard_created.stat.exists
+
+    - name: Patch datasource to use custom plugin type
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/{{ ds_get.json.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ grafana_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: >-
+          {{
+            ds_get.json
+            | combine({'type': 'influxdb-adecwatts-datasource'}, recursive=True)
+          }}
+        status_code: 200
+        validate_certs: false
       when: not dashboard_created.stat.exists
 
     - name: Export master dashboard as JSON file
