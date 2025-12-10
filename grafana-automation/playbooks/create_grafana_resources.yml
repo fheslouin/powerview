@@ -24,6 +24,10 @@
     overview_template: "{{ playbook_dir }}/../templates/powerview-overview.json"
     overview_json_file: "/srv/powerview/dashboard_overview.json"
 
+    # UIDs déterministes pour l'idempotence des dashboards
+    campaign_dashboard_uid: "powerview_{{ company_name }}_{{ campaign_name }}"
+    overview_dashboard_uid: "powerview_overview_{{ company_name }}"
+
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
     grafana_auth_headers: >-
       {{
@@ -280,7 +284,6 @@
         path: "{{ exported_dashboard_json_file }}"
         uid: "adq2j6z"
         validate_certs: false
-        validate_certs: false
       register: exported_dashboard
       when: not dashboard_created.stat.exists
 
@@ -296,7 +299,7 @@
         jq '
           del(.dashboard.version)
           | del(.dashboard.id)
-          | del(.dashboard.uid)
+          | .dashboard.uid = "{{ campaign_dashboard_uid }}"
           | del(.meta)
           | .dashboard.title = "{{ campaign_name }}"
           | walk(
@@ -331,7 +334,7 @@
         var: debug_dashboard_json.stdout
       when: not dashboard_created.stat.exists
 
-    - name: Import dashboard from templated JSON
+    - name: Import dashboard from templated JSON (idempotent via UID fixe)
       community.grafana.grafana_dashboard:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
@@ -339,7 +342,7 @@
         state: present
         path: "{{ json_file }}"
         folder: "{{ company_name }}"
-        uid: '{{ lookup("pipe", "uuidgen") }}'
+        uid: "{{ campaign_dashboard_uid }}"
         overwrite: true
         validate_certs: false
       register: imported_dashboard
@@ -376,7 +379,8 @@
         fi
 
         jq '
-          .title = "Overview {{ company_name }}"
+          .uid = "{{ overview_dashboard_uid }}"
+          | .title = "Overview {{ company_name }}"
           | walk(
               if type == "object"
                  and has("datasource")
@@ -404,7 +408,7 @@
         - not dashboard_created.stat.exists
         - overview_template_stat.stat.exists
 
-    - name: Import overview dashboard for company
+    - name: Import overview dashboard for company (idempotent via UID fixe)
       community.grafana.grafana_dashboard:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
@@ -412,7 +416,7 @@
         state: present
         path: "{{ overview_json_file }}"
         folder: "{{ company_name }}"
-        uid: '{{ lookup("pipe", "uuidgen") }}'
+        uid: "{{ overview_dashboard_uid }}"
         overwrite: true
         validate_certs: false
       register: imported_overview
@@ -490,7 +494,7 @@
           - "============================================"
           - "Team: {{ company_name }} (id={{ grafana_team_id }})"
           - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
-          - "Dashboard: {{ campaign_name }}"
-          - "Overview dashboard: Overview {{ company_name }}"
+          - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
+          - "Overview dashboard: Overview {{ company_name }} (uid={{ overview_dashboard_uid }})"
           - "Folder: {{ company_name }}"
       when: not dashboard_created.stat.exists

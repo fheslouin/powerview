@@ -23,7 +23,7 @@
     {
       "datasource": {
         "type": "influxdb-adecwatts-datasource",
-        "uid": "P26BF481922FC7B18"
+        "uid": "{{ datasource_uid }}"
       },
       "fieldConfig": {
         "defaults": {
@@ -106,9 +106,9 @@
         {
           "datasource": {
             "type": "influxdb-adecwatts-datasource",
-            "uid": "P26BF481922FC7B18"
+            "uid": "{{ datasource_uid }}"
           },
-          "query": "from(bucket:\"company1\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
+          "query": "from(bucket:\"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
           "refId": "A"
         }
       ],
