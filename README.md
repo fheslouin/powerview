@@ -58,17 +58,34 @@ cp .env.sample .env
 À minima :
 
 * Définir un `GRAFANA_PASSWORD`
-* Définir `INFLUXDB_ADMIN_TOKEN` (récupérable dans l’interface web d’InfluxDB)
+* Définir `INFLUXDB_ADMIN_TOKEN` **avec un token All Access (token root) de ton instance InfluxDB**
+  * ce token est utilisé :
+    * par le parseur TSV (`tsv_parser.py`) pour créer les buckets et écrire les points ;
+    * par les datasources Grafana créées automatiquement (une datasource `influxdb_<company>` par client).
 * Vérifier / ajuster :
-  * `INFLUXDB_HOST` (URL InfluxDB accessible depuis le parseur et Ansible)
-  * `INFLUXDB_ORG` (nom de l’organisation InfluxDB)
+  * `INFLUXDB_HOST` (URL InfluxDB accessible depuis le parseur et Ansible, ex. `http://localhost:8086`)
+  * `INFLUXDB_ORG` (nom de l’organisation InfluxDB, ex. `powerview`)
   * `GRAFANA_URL`, `GRAFANA_USERNAME`, `GRAFANA_PASSWORD`
 
+> Remarque : l’ancien modèle “un token InfluxDB dédié par bucket client” (via
+> `manage_influx_tokens.py`) n’est plus utilisé par défaut, car certaines
+> configurations InfluxDB restreignent la création d’authorizations (403).
+> PowerView utilise désormais un **token partagé** (`INFLUXDB_ADMIN_TOKEN`)
+> pour toutes les datasources Grafana.  
+> Les détails sont dans `grafana-automation/README.md`.
+
 ### Démarrer Grafana et InfluxDB
+
+Depuis la racine du projet (`/srv/powerview`) :
 
 ```shell
 podman compose up -d
 ```
+
+Cela démarre au minimum :
+
+- InfluxDB (port 8086 dans le compose)
+- Grafana (port 8088 dans le compose)
 
 ## Installer Caddy sur l’hôte
 
@@ -245,7 +262,7 @@ SFTPGo génère des événements à chaque upload de fichier ou création de dos
     * nom : `influxdb_<company_name>` ;
     * type de plugin : `influxdb-adecwatts-datasource` (plugin custom défini par `plugin.json`) ;
     * bucket par défaut : `<company_name>` dans InfluxDB ;
-    * token InfluxDB **dédié** au bucket `<company_name>`, généré automatiquement (voir ci‑dessous) ;
+    * **token InfluxDB partagé** : `INFLUXDB_ADMIN_TOKEN` (token root / All Access) ;
   * exporte le dashboard maître Grafana utilisé comme référence (visible dans Grafana : Dashboard -> admin -> Master) ;
   * modifie et importe le nouveau dashboard dans le dossier de la Team (en remplaçant type + uid de la datasource par ceux de `influxdb_<company_name>`) ;
   * applique les permissions sur le dashboard et le dossier pour la Team créée.
@@ -264,7 +281,7 @@ Pour chaque client (`company_name`) :
 * une **datasource InfluxDB dédiée** : `influxdb_<company_name>`
   * type de plugin : `influxdb-adecwatts-datasource` ;
   * bucket par défaut : `<company_name>` ;
-  * token InfluxDB dédié au bucket `<company_name>` (créé automatiquement) ;
+  * **token InfluxDB partagé** : `INFLUXDB_ADMIN_TOKEN` (token root / All Access) ;
 * un ou plusieurs **dashboards** (un par campagne) dans le folder `company_name` ;
 * des **permissions** qui donnent à la team `company_name` un accès *viewer* au folder et aux dashboards.
 
@@ -280,7 +297,7 @@ Instance Grafana unique
     |      |       +-- Datasource "influxdb_company1"
     |      |       |      - plugin: influxdb-adecwatts-datasource
     |      |       |      - bucket: company1
-    |      |       |      - token: powerview_token_for_bucket_company1
+    |      |       |      - token: INFLUXDB_ADMIN_TOKEN (partagé)
     |      |       |
     |      |       +-- Dashboards: campaign1, campaign2, ...
     |
@@ -291,7 +308,7 @@ Instance Grafana unique
                    +-- Datasource "influxdb_company2"
                    |      - plugin: influxdb-adecwatts-datasource
                    |      - bucket: company2
-                   |      - token: powerview_token_for_bucket_company2
+                   |      - token: INFLUXDB_ADMIN_TOKEN (partagé)
                    |
                    +-- Dashboards: campaignA, campaignB, ...
 ```
@@ -305,8 +322,7 @@ Les **utilisateurs Grafana** sont créés séparément (via l’UI Grafana ou un
 Le playbook de création (`grafana-automation/playbooks/create_grafana_resources.yml`) :
 
 * ne crée **pas** d’utilisateurs ;
-* crée/maintient uniquement : team, folder, datasource `influxdb_<company_name>` (plugin `influxdb-adecwatts-datasource`), dashboards, permissions de la team ;
-* appelle le script Python `manage_influx_tokens.py` pour créer ou récupérer un **token InfluxDB dédié** au bucket `<company_name>` et l’injecter dans la datasource Grafana.
+* crée/maintient uniquement : team, folder, datasource `influxdb_<company_name>` (plugin `influxdb-adecwatts-datasource`), dashboards, permissions de la team.
 
 Le playbook de suppression (`grafana-automation/playbooks/delete_grafana_resources.yml`) permet, lui, de :
 
@@ -314,7 +330,13 @@ Le playbook de suppression (`grafana-automation/playbooks/delete_grafana_resourc
 * supprimer la datasource `influxdb_<company_name>` ;
 * supprimer la team associée ;
 * et, si tu le souhaites, supprimer aussi un utilisateur Grafana donné.  
-  (Les tokens InfluxDB ne sont pas supprimés automatiquement pour l’instant.)
+  (Les buckets InfluxDB et les données ne sont pas supprimés.)
+
+Pour plus de détails sur l’automatisation Grafana, voir :
+
+```text
+grafana-automation/README.md
+```
 
 ## Workflow de traitement des données (détaillé)
 
@@ -381,21 +403,18 @@ Cette section résume le flux complet, de l’upload d’un fichier TSV jusqu’
    * Le playbook `create_grafana_resources.yml` :
      * crée (ou vérifie l’existence de) la team Grafana `<company>` ;
      * crée le folder Grafana `<company>` ;
-     * appelle le script Python `manage_influx_tokens.py --bucket <company>` pour :
-       * vérifier que le bucket `<company>` existe (créé par le parseur),
-       * créer ou récupérer un **token InfluxDB dédié** au bucket `<company>` (permissions read/write sur ce bucket uniquement) ;
      * crée une datasource `influxdb_<company>` de type plugin `influxdb-adecwatts-datasource` pointant sur :
        * `INFLUXDB_HOST` (URL),
        * l’organisation `INFLUXDB_ORG`,
        * le bucket par défaut `<company>`,
-       * le token dédié renvoyé par `manage_influx_tokens.py` ;
+       * le token partagé `INFLUXDB_ADMIN_TOKEN` ;
      * exporte un dashboard maître, le duplique et l’adapte pour la campagne (`title = <campaign>`, datasource mise à jour vers `influxdb_<company>` avec type `influxdb-adecwatts-datasource`) ;
      * importe ce nouveau dashboard dans le folder `<company>` ;
      * applique les permissions (la team `<company>` a accès en lecture au folder et au dashboard) ;
      * crée un fichier `.dashboard.created` dans `/srv/sftpgo/data/<company>/<campaign>/` pour éviter de recréer les ressources à chaque événement.
 
 7. **Visualisation dans Grafana**
-   * Les dashboards créés automatiquement utilisent des requêtes Flux basées sur :
+   * Les dashboards créés automatiquement utilisent des requêtes (SQL ou Flux selon le plugin) basées sur :
      * le bucket = `<company>` (configuré dans la datasource),
      * le measurement = `<campaign>` (nom du dashboard),
      * les tags (`device_master_sn`, `channel_name`, `channel_label`, `channel_unit`, etc.).
@@ -433,3 +452,4 @@ from(bucket: v.defaultBucket)
   |> filter(fn: (r) => contains(value: r._field, set: ${channels:json}))
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> yield(name: "multi_sn_channel")
+```

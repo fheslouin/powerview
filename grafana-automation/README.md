@@ -15,6 +15,7 @@ mais peuvent aussi être exécutés manuellement.
   - nom : `influxdb_{{ company_name }}`
   - type de plugin : `influxdb-adecwatts-datasource`
   - bucket par défaut : `{{ company_name }}`
+  - **token utilisé : `INFLUXDB_ADMIN_TOKEN` (ou un token All Access partagé)**
 - ✅ Création automatique d’un **dashboard par campagne** :
   - export d’un dashboard maître existant (UID fixe),
   - adaptation (titre = `campaign_name`, datasource remplacée par `influxdb_{{ company_name }}` avec le plugin `influxdb-adecwatts-datasource`),
@@ -50,6 +51,12 @@ mais peuvent aussi être exécutés manuellement.
   - `INFLUXDB_ADMIN_TOKEN`
   - `INFLUXDB_USERNAME`
   - `INFLUXDB_PASSWORD`
+
+> Note : auparavant, le playbook appelait `manage_influx_tokens.py` pour créer
+> un token dédié par bucket (`powerview_token_for_bucket_<company>`).  
+> Suite à des restrictions de permissions InfluxDB (403 sur la création
+> d’authorizations), la version actuelle utilise directement
+> `INFLUXDB_ADMIN_TOKEN` comme token pour toutes les datasources Grafana.
 
 ## Installation des collections Ansible
 
@@ -103,6 +110,8 @@ Le playbook lit les variables suivantes via `lookup('ansible.builtin.env', ...)`
 - `INFLUXDB_ADMIN_TOKEN`
 - `INFLUXDB_USERNAME`
 - `INFLUXDB_PASSWORD`
+- `INFLUXDB_HOST`
+- `INFLUXDB_ORG`
 
 Ces variables sont typiquement chargées par `on-upload.sh` à partir de
 `/srv/powerview/.env`.
@@ -150,12 +159,14 @@ ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml \
    - Utilise `community.grafana.grafana_datasource`.
    - Nom : `influxdb_<company_name>`.
    - `ds_type: influxdb-adecwatts-datasource`.
-   - URL : `http://influxdb:8086`.
+   - URL : `INFLUXDB_HOST` (par ex. `http://localhost:8086`).
    - Authentification basique : `INFLUXDB_USERNAME` / `INFLUXDB_PASSWORD`.
    - `additional_json_data` :
      - `version: "Flux"`
-     - `organization: "powerview"`
+     - `organization: INFLUXDB_ORG`
      - `defaultBucket: "<company_name>"`
+   - `additional_secure_json_data` :
+     - `token: INFLUXDB_ADMIN_TOKEN` (token partagé, typiquement All Access).
 
 5. **Export du dashboard maître**
 
@@ -221,7 +232,7 @@ Dans l’ordre :
 
 1. **Dashboards** du dossier `company_name`
 2. **Dossier Grafana** `company_name`
-3. **Datasource** `influxdb_<company_name>` (plugin `influxdb-adecwatts-datasource`)
+3. **Datasource** `influxdb_{{ company_name }}` (plugin `influxdb-adecwatts-datasource`)
 4. **Team Grafana** `company_name`
 5. **Utilisateur Grafana** `user_name`
 
@@ -241,3 +252,6 @@ Un résumé est affiché à la fin.
 - La création d’utilisateurs Grafana n’est plus gérée automatiquement lors de la
   création des ressources ; elle reste manuelle (ou gérée ailleurs), seul le
   playbook de suppression supprime encore un utilisateur existant.
+- Les datasources utilisent désormais un **token InfluxDB partagé**
+  (`INFLUXDB_ADMIN_TOKEN`), ce qui simplifie la configuration quand la création
+  d’authorizations InfluxDB est restreinte.
