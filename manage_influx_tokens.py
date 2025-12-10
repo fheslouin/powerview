@@ -24,6 +24,10 @@ from typing import Optional
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
+
+
+from influxdb_client.domain.authorization import Authorization
+from influxdb_client.domain.permission import Permission
 # Charge les variables d'environnement depuis .env (si présent)
 load_dotenv()
 
@@ -35,63 +39,51 @@ def _get_env(name: str) -> str:
     return value
 
 
-def get_or_create_token_for_bucket(
-    client: InfluxDBClient,
-    org_id: str,
-    bucket_id: str,
-    bucket_name: str,
-) -> str:
-    """
-    Retourne un token existant pour ce bucket (si trouvé via la description),
-    sinon crée un nouveau token avec droits read/write sur ce bucket.
-
-    Implémentation compatible avec influxdb-client 1.49.0 en utilisant
-    un simple dict pour l'authorization (pas les classes Authorization/Permission/Resource).
-    """
+def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
     auth_api = client.authorizations_api()
 
     description = f"powerview_token_for_bucket_{bucket_name}"
 
-    # 1. Cherche un token existant avec cette description
+    # Vérifier si un token existe déjà
     existing = auth_api.find_authorizations()
     for auth in existing or []:
-        desc = getattr(auth, "description", None)
-        token = getattr(auth, "token", None)
-        if desc == description and token:
-            return token
+        if getattr(auth, "description", None) == description and getattr(auth, "token", None):
+            return auth.token
 
-    # 2. Crée un nouveau token avec permissions RW sur ce bucket
-    body = {
-        "orgID": org_id,
-        "description": description,
-        "permissions": [
-            {
-                "action": "read",
-                "resource": {
-                    "type": "buckets",
-                    "id": bucket_id,
-                    "orgID": org_id,
-                },
-            },
-            {
-                "action": "write",
-                "resource": {
-                    "type": "buckets",
-                    "id": bucket_id,
-                    "orgID": org_id,
-                },
-            },
-        ],
-    }
+    # Permissions RW sur ce bucket
+    permissions = [
+        Permission(
+            action="read",
+            resource={
+                "type": "buckets",
+                "id": bucket_id,
+                "org_id": org_id,
+            }
+        ),
+        Permission(
+            action="write",
+            resource={
+                "type": "buckets",
+                "id": bucket_id,
+                "org_id": org_id,
+            }
+        )
+    ]
 
-    new_auth = auth_api.create_authorization(authorization=body)
+    # Authorization DOIT être un objet
+    auth_body = Authorization(
+        org_id=org_id,
+        description=description,
+        permissions=permissions,
+    )
 
-    token = getattr(new_auth, "token", None)
-    if not token:
-        raise RuntimeError("Impossible de récupérer le token créé pour le bucket")
+    # Appel API (pas de dict !)
+    new_auth = auth_api.create_authorization(authorization=auth_body)
 
-    return token
+    if not new_auth.token:
+        raise RuntimeError("Token non retourné par InfluxDB")
 
+    return new_auth.token
 
 def find_bucket_id(client: InfluxDBClient, bucket_name: str, org: str) -> Optional[str]:
     """
