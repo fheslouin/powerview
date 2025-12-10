@@ -48,7 +48,20 @@ def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
     description = f"powerview_token_for_bucket_{bucket_name}"
 
     # Vérifier si un token existe déjà
-    existing = auth_api.find_authorizations()
+    try:
+        existing = auth_api.find_authorizations()
+    except ApiException as e:
+        if e.status == 403:
+            print(
+                "Erreur 403 InfluxDB: le token INFLUXDB_ADMIN_TOKEN n'a pas les "
+                "permissions suffisantes pour lister les authorizations.\n"
+                "Vérifie dans l'UI InfluxDB que ce token est bien un token 'All Access' "
+                "ou qu'il a au moins les droits sur 'authorizations/*'.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise
+
     for auth in existing or []:
         if getattr(auth, "description", None) == description and getattr(auth, "token", None):
             return auth.token
@@ -81,7 +94,23 @@ def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
     )
 
     # Appel API (pas de dict !)
-    new_auth = auth_api.create_authorization(authorization=auth_body)
+    try:
+        new_auth = auth_api.create_authorization(authorization=auth_body)
+    except ApiException as e:
+        if e.status == 403:
+            print(
+                "Erreur 403 InfluxDB lors de la création du token dédié au bucket.\n"
+                "Le token INFLUXDB_ADMIN_TOKEN n'a pas les permissions suffisantes pour "
+                "créer des authorizations.\n\n"
+                "Actions à faire dans InfluxDB :\n"
+                "  1) Aller dans 'Load Data' -> 'Tokens'.\n"
+                "  2) Créer (ou récupérer) un token 'All Access' pour l'organisation "
+                "utilisée par PowerView.\n"
+                "  3) Mettre ce token dans le fichier .env comme INFLUXDB_ADMIN_TOKEN.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise
 
     if not new_auth.token:
         raise RuntimeError("Token non retourné par InfluxDB")
@@ -153,7 +182,7 @@ def main() -> None:
                 print(
                     "Erreur 403 InfluxDB: le token INFLUXDB_ADMIN_TOKEN n'a pas les "
                     "permissions suffisantes pour lire les buckets.\n"
-                    "Vérifie dans l'UI InfluxDB que ce token est bien un token admin "
+                    "Vérifie dans l'UI InfluxDB que ce token est bien un token 'All Access' "
                     "ou qu'il a au moins les droits read/write sur les buckets.",
                     file=sys.stderr,
                 )
@@ -209,6 +238,7 @@ def main() -> None:
             )
             sys.exit(1)
 
+        # Création / récupération du token dédié au bucket
         bucket_token = get_or_create_token_for_bucket(
             client=client,
             org_id=org_id,
