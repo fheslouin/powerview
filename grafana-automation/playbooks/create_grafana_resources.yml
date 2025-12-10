@@ -256,16 +256,25 @@
           exit 1
         fi
 
-        jq 'del(.dashboard.version)
-            | del(.dashboard.id)
-            | del(.dashboard.uid)
-            | del(.meta)
-            | .dashboard.title = "{{ campaign_name }}"
-            | (..|objects
-               | select(has("type") and has("uid") and .type=="influxdb")
-               | .type = "influxdb-adecwatts-datasource"
-               | .uid = "{{ created_datasource.datasource.uid }}" )' \
-           "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
+        jq '
+          del(.dashboard.version)
+          | del(.dashboard.id)
+          | del(.dashboard.uid)
+          | del(.meta)
+          | .dashboard.title = "{{ campaign_name }}"
+          | walk(
+              if type == "object"
+                 and has("type")
+                 and has("uid")
+                 and .type == "influxdb"
+              then
+                .type = "influxdb-adecwatts-datasource"
+                | .uid = "{{ created_datasource.datasource.uid }}"
+              else
+                .
+              end
+            )
+        ' "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
       args:
         executable: /bin/bash
       when: not dashboard_created.stat.exists
@@ -313,13 +322,27 @@
         fi
 
         jq '
-          .title = "Overview {{ company_name }}" |
-          (..|objects
-            | select(has("datasource") and .datasource.type=="influxdb-adecwatts-datasource")
-            | .datasource.uid = "{{ created_datasource.datasource.uid }}" ) |
-          (..|objects
-            | select(has("query"))
-            | .query |= sub("from\\(bucket:\\\"company1\\\"\\)"; "from(bucket:\\\"{{ company_name }}\\\")")
+          .title = "Overview {{ company_name }}"
+          | walk(
+              if type == "object"
+                 and has("datasource")
+                 and .datasource.type == "influxdb-adecwatts-datasource"
+              then
+                .datasource.uid = "{{ created_datasource.datasource.uid }}"
+              else
+                .
+              end
+            )
+          | walk(
+              if type == "object"
+                 and has("query")
+                 and (.query | type == "string")
+              then
+                .query |= sub("from\\(bucket:\\\"company1\\\"\\)"; "from(bucket:\\\"{{ company_name }}\\\")")
+              else
+                .
+              end
+            )
         ' "{{ overview_template }}" > "{{ overview_json_file }}"
       args:
         executable: /bin/bash
