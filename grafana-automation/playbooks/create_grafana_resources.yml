@@ -218,7 +218,7 @@
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
         ds_type: influxdb
-        ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
+        ds_url: "{{ influxdb_url | default('http://influxdb:8086') }}"
         access: proxy
         is_default: false
         additional_json_data:
