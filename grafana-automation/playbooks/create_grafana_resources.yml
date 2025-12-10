@@ -221,7 +221,6 @@
         ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         access: proxy
         is_default: false
-        basic_auth: false
         additional_json_data:
           version: "Flux"
           organization: "{{ influxdb_org }}"
@@ -280,6 +279,7 @@
         state: export
         path: "{{ exported_dashboard_json_file }}"
         uid: "adq2j6z"
+        validate_certs: false
         validate_certs: false
       register: exported_dashboard
       when: not dashboard_created.stat.exists
