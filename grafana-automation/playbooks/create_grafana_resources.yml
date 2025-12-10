@@ -212,7 +212,10 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
-        ds_type: influxdb-adecwatts-datasource
+        # IMPORTANT : ds_type doit être un type supporté par le module Ansible.
+        # On utilise donc 'influxdb' ici, même si le plugin Grafana réel est
+        # 'influxdb-adecwatts-datasource'.
+        ds_type: influxdb
         ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         basic_auth_user: "{{ influxdb_username }}"
         basic_auth_password: "{{ influxdb_password }}"
