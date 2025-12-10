@@ -19,8 +19,9 @@
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
 
-    # Nouveau : fichier temporaire pour le dashboard overview
-    overview_template: "/srv/powerview/grafana-automation/templates/powerview-overview.json"
+    # Fichier temporaire pour le dashboard overview
+    # IMPORTANT : chemin RELATIF au répertoire du projet (playbook lancé depuis /srv/powerview)
+    overview_template: "grafana-automation/templates/powerview-overview.json"
     overview_json_file: "/srv/powerview/dashboard_overview.json"
 
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
@@ -216,9 +217,6 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
-        # IMPORTANT : ds_type doit être un type supporté par le module Ansible.
-        # On utilise donc 'influxdb' ici, même si le plugin Grafana réel est
-        # 'influxdb-adecwatts-datasource'.
         ds_type: influxdb
         ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         basic_auth_user: "{{ influxdb_username }}"
@@ -393,8 +391,7 @@
               permission: 1
         status_code: 200
         validate_certs: false
-      when:
-        - not dashboard_created.stat.exists
+      when: not dashboard_created.stat.exists
 
     # ------------------------------------------------------------------
     # Nettoyage + marqueur .dashboard.created
