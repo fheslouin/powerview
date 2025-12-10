@@ -23,8 +23,9 @@ from typing import Optional
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
-# Load environment variables from .env file
+# Charge les variables d'environnement depuis .env (si présent)
 load_dotenv()
+
 
 def _get_env(name: str) -> str:
     value = os.getenv(name)
@@ -50,9 +51,11 @@ def get_or_create_token_for_bucket(
     # 1. Cherche un token existant avec cette description
     existing = auth_api.find_authorizations()
     for auth in existing or []:
-        # auth est un dict-like dans les versions récentes
-        if auth.get("description") == description and auth.get("token"):
-            return auth["token"]
+        # Dans influxdb-client 1.49, auth est un objet Authorization
+        desc = getattr(auth, "description", None)
+        token = getattr(auth, "token", None)
+        if desc == description and token:
+            return token
 
     # 2. Crée un nouveau token avec permissions RW sur ce bucket
     permissions = [
@@ -80,8 +83,8 @@ def get_or_create_token_for_bucket(
         description=description,
     )
 
-    # new_auth est aussi un dict-like
-    token = getattr(new_auth, "token", None) or new_auth.get("token")
+    # new_auth est un objet Authorization
+    token = getattr(new_auth, "token", None)
     if not token:
         raise RuntimeError("Impossible de récupérer le token créé pour le bucket")
 
@@ -91,17 +94,22 @@ def get_or_create_token_for_bucket(
 def find_bucket_id(client: InfluxDBClient, bucket_name: str, org: str) -> Optional[str]:
     """
     Retourne l'ID du bucket pour un nom donné, ou None si introuvable.
+    Compatible avec influxdb-client 1.49.0 où find_buckets().buckets
+    renvoie des objets Bucket.
     """
     buckets_api = client.buckets_api()
     result = buckets_api.find_buckets()
-    buckets = getattr(result, "buckets", None) or result.get("buckets", [])
+    buckets = getattr(result, "buckets", None) or []
+
     for b in buckets:
-        # b peut être un objet ou un dict
-        name = getattr(b, "name", None) or b.get("name")
-        org_name = getattr(b, "org", None) or b.get("org")
-        org_id = getattr(b, "org_id", None) or b.get("orgID") or b.get("org_id")
+        # b est un objet Bucket
+        name = getattr(b, "name", None)
+        org_name = getattr(b, "org", None)
+        org_id = getattr(b, "org_id", None)
+
         if name == bucket_name and (org_name == org or org_id):
-            return getattr(b, "id", None) or b.get("id")
+            return getattr(b, "id", None)
+
     return None
 
 
@@ -131,9 +139,9 @@ def main() -> None:
             print(f"Organisation InfluxDB introuvable : {org}", file=sys.stderr)
             sys.exit(1)
 
-        # orgs[0] peut être un objet ou un dict
+        # orgs[0] est un objet Organization
         org_obj = orgs[0]
-        org_id = getattr(org_obj, "id", None) or org_obj.get("id")
+        org_id = getattr(org_obj, "id", None)
         if not org_id:
             print(f"Impossible de récupérer l'ID de l'organisation : {org}", file=sys.stderr)
             sys.exit(1)
