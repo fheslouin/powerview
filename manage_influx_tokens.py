@@ -20,8 +20,11 @@ import os
 import sys
 from typing import Optional
 
+from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
+# Load environment variables from .env file
+load_dotenv()
 
 def _get_env(name: str) -> str:
     value = os.getenv(name)
