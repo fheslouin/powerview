@@ -9,7 +9,7 @@ mais peuvent aussi être exécutés manuellement.
 
 ## Fonctionnalités actuelles
 
-- ✅ Création d’une **team Grafana** par client (`company_name`)
+- ✅ Utilisation d’une **team Grafana par client** (`company_name`)
 - ✅ Création d’un **dossier Grafana** par client (`company_name`)
 - ✅ Création d’une **datasource InfluxDB par client** :
   - nom : `influxdb_{{ company_name }}`
@@ -27,6 +27,23 @@ mais peuvent aussi être exécutés manuellement.
   - `data/<company_name>/<campaign_name>/.dashboard.created`
 - ✅ Playbook de **nettoyage** pour supprimer :
   - dashboards, dossier, datasource du client, utilisateur Grafana associé.
+
+> Remarque importante : la **création de la team Grafana** n’est plus gérée
+> automatiquement par le playbook de création (`create_grafana_resources.yml`).
+> Dans l’environnement actuel (auth Grafana spécifique), l’API `/api/teams`
+> renvoie 401 malgré un compte Admin / token Admin.
+>
+> **Tu dois donc créer la team manuellement dans Grafana** :
+>
+> 1. Aller dans *Configuration → Teams*.
+> 2. Créer une team dont le nom est exactement `company_name`
+>    (par ex. `company1`).
+> 3. Ajouter les utilisateurs Grafana de ce client dans cette team.
+>
+> Le playbook se contente ensuite de :
+> - vérifier que la team existe (`/api/teams/search?name=company_name`),
+> - récupérer son `teamId`,
+> - appliquer les permissions sur le folder et le dashboard pour cette team.
 
 > Remarque : la **création d’utilisateurs Grafana** n’est plus gérée par le
 > playbook de création (`create_grafana_resources.yml`).  
@@ -50,9 +67,8 @@ mais peuvent aussi être exécutés manuellement.
     - `GRAFANA_PASSWORD`
   - **Mode avancé (optionnel)** : token API Grafana :
     - `GRAFANA_API_TOKEN` = token d’un service account Grafana avec rôle **Admin**
-    - ce token peut être utilisé pour certains appels API, mais la création
-      de teams/dossiers reste plus fiable avec login/mot de passe selon la
-      configuration de Grafana / des plugins d’auth.
+    - ce token est utilisé pour certains appels API (permissions), mais la
+      création de teams se fait désormais manuellement.
   - `INFLUXDB_HOST`
   - `INFLUXDB_ORG`
   - `INFLUXDB_ADMIN_TOKEN`
