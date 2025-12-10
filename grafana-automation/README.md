@@ -45,11 +45,14 @@ mais peuvent aussi être exécutés manuellement.
 - Fichier `.env` à la racine du projet PowerView (`/srv/powerview/.env`) contenant au minimum :
 
   - `GRAFANA_URL`
-  - soit **un token API Grafana** (recommandé) :
-    - `GRAFANA_API_TOKEN` = token d’un service account Grafana avec rôle **Admin**
-  - soit (ancien mode) un login/mot de passe admin :
+  - **Mode principal (recommandé pour l’instant)** : login/mot de passe admin Grafana :
     - `GRAFANA_USERNAME`
     - `GRAFANA_PASSWORD`
+  - **Mode avancé (optionnel)** : token API Grafana :
+    - `GRAFANA_API_TOKEN` = token d’un service account Grafana avec rôle **Admin**
+    - ce token peut être utilisé pour certains appels API, mais la création
+      de teams/dossiers reste plus fiable avec login/mot de passe selon la
+      configuration de Grafana / des plugins d’auth.
   - `INFLUXDB_HOST`
   - `INFLUXDB_ORG`
   - `INFLUXDB_ADMIN_TOKEN`

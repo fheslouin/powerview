@@ -19,9 +19,11 @@
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
 
+    # Headers d'auth optionnels si on utilise un token API pour certains appels URI
     grafana_auth_headers: >-
       {{
-        {'Authorization': 'Bearer ' ~ grafana_api_token}
+        {} if (grafana_api_token | length == 0)
+        else {'Authorization': 'Bearer ' ~ grafana_api_token}
       }}
 
   tasks:
@@ -38,28 +40,32 @@
           ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml
           --extra-vars "company_name=company1 campaign_name=campaign1"
 
-    - name: Validate Grafana API token is set
+    - name: Validate Grafana username/password are set
       ansible.builtin.assert:
         that:
-          - grafana_api_token is defined
-          - grafana_api_token | length > 0
+          - grafana_username is defined
+          - grafana_password is defined
+          - grafana_username | length > 0
+          - grafana_password | length > 0
         fail_msg: >
-          GRAFANA_API_TOKEN doit être défini dans l'environnement (.env) et
-          correspondre à un token de service account Grafana avec rôle Admin.
+          GRAFANA_USERNAME et GRAFANA_PASSWORD doivent être définis dans l'environnement (.env)
+          et correspondre à un compte Grafana avec rôle Admin.
 
     - name: Debug Grafana connection settings
       ansible.builtin.debug:
         msg:
           - "GRAFANA_URL={{ grafana_url }}"
+          - "GRAFANA_USERNAME={{ grafana_username }}"
+          - "GRAFANA_PASSWORD défini: {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
           - "GRAFANA_API_TOKEN défini: {{ grafana_api_token | length > 0 }}"
-          - "GRAFANA_USERNAME (pour modules community.grafana)={{ grafana_username }}"
-          - "GRAFANA_PASSWORD défini (pour modules community.grafana): {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
 
     - name: Check Grafana health (auth + URL)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/health"
         method: GET
-        headers: "{{ grafana_auth_headers }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         status_code: 200
         validate_certs: false
       register: grafana_health
@@ -74,34 +80,21 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/teams"
         method: POST
-        headers: "{{ grafana_auth_headers }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         body_format: json
         body:
           name: "{{ company_name }}"
-        status_code: [200, 409, 401]
+        status_code: [200, 409]
         validate_certs: false
       register: created_team
       when: not dashboard_created.stat.exists
-      ignore_errors: true
 
     - name: Debug Create Grafana Team response
       ansible.builtin.debug:
         var: created_team
       when: not dashboard_created.stat.exists
-
-    - name: Fail explicitly if team creation unauthorized
-      ansible.builtin.fail:
-        msg: >
-          Échec de la création de la team Grafana (company_name={{ company_name }}).
-          Status={{ created_team.status | default('n/a') }},
-          body={{ created_team.json | default(created_team.content | default('')) }}.
-          Vérifie que ton token Grafana (GRAFANA_API_TOKEN) a bien les droits Admin
-          (gestion des teams) et que la valeur est correcte.
-      when:
-        - not dashboard_created.stat.exists
-        - created_team is defined
-        - created_team.status is defined
-        - created_team.status not in [200, 409]
 
     - name: Create Grafana folder for team
       community.grafana.grafana_folder:
@@ -223,6 +216,9 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ imported_dashboard.uid }}/permissions"
         method: POST
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         headers: "{{ grafana_auth_headers }}"
         body_format: json
         body:
@@ -239,6 +235,9 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/folders/{{ created_folder.folder.uid }}/permissions"
         method: POST
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         headers: "{{ grafana_auth_headers }}"
         body_format: json
         body:
