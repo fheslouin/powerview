@@ -32,6 +32,25 @@
           ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml
           --extra-vars "company_name=company1 campaign_name=campaign1"
 
+    - name: Debug Grafana connection settings
+      ansible.builtin.debug:
+        msg:
+          - "GRAFANA_URL={{ grafana_url }}"
+          - "GRAFANA_USERNAME={{ grafana_username }}"
+          - "GRAFANA_PASSWORD est défini: {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
+
+    - name: Check Grafana health (auth + URL)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/health"
+        method: GET
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: 200
+        validate_certs: false
+      register: grafana_health
+      failed_when: grafana_health.status != 200
+
     - name: Check if dashboard created file exists
       stat:
         path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
