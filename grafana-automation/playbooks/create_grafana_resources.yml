@@ -19,11 +19,10 @@
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
 
-    # Headers d'auth optionnels si on utilise un token API pour certains appels URI
+    # Headers d'auth pour les appels REST (URI) : on force le token Admin
     grafana_auth_headers: >-
       {{
-        {} if (grafana_api_token | length == 0)
-        else {'Authorization': 'Bearer ' ~ grafana_api_token}
+        {'Authorization': 'Bearer ' ~ grafana_api_token}
       }}
 
   tasks:
@@ -49,7 +48,17 @@
           - grafana_password | length > 0
         fail_msg: >
           GRAFANA_USERNAME et GRAFANA_PASSWORD doivent être définis dans l'environnement (.env)
-          et correspondre à un compte Grafana avec rôle Admin.
+          et correspondre à un compte Grafana avec rôle Admin (pour les modules community.grafana.*).
+
+    - name: Validate Grafana API token is set
+      ansible.builtin.assert:
+        that:
+          - grafana_api_token is defined
+          - grafana_api_token | length > 0
+        fail_msg: >
+          GRAFANA_API_TOKEN doit être défini dans l'environnement (.env) et
+          correspondre à un token de service account Grafana avec rôle Admin
+          (utilisé pour les appels REST /api/teams et permissions).
 
     - name: Debug Grafana connection settings
       ansible.builtin.debug:
@@ -59,13 +68,11 @@
           - "GRAFANA_PASSWORD défini: {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
           - "GRAFANA_API_TOKEN défini: {{ grafana_api_token | length > 0 }}"
 
-    - name: Check Grafana health (auth + URL)
+    - name: Check Grafana health (auth + URL) via token
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/health"
         method: GET
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         status_code: 200
         validate_certs: false
       register: grafana_health
@@ -76,13 +83,11 @@
         path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
       register: dashboard_created
 
-    - name: Create Grafana Team
+    - name: Create Grafana Team (via token)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/teams"
         method: POST
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        headers: "{{ grafana_auth_headers }}"
         body_format: json
         body:
           name: "{{ company_name }}"
@@ -96,7 +101,7 @@
         var: created_team
       when: not dashboard_created.stat.exists
 
-    - name: Create Grafana folder for team
+    - name: Create Grafana folder for team (via login/mot de passe)
       community.grafana.grafana_folder:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
@@ -212,13 +217,10 @@
       register: imported_dashboard
       when: not dashboard_created.stat.exists
 
-    - name: Set dashboard permissions for team (viewer role)
+    - name: Set dashboard permissions for team (viewer role) via token
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ imported_dashboard.uid }}/permissions"
         method: POST
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
         headers: "{{ grafana_auth_headers }}"
         body_format: json
         body:
@@ -231,13 +233,10 @@
         - not dashboard_created.stat.exists
         - (created_team.status | default(200)) != 409
 
-    - name: Set folder permissions for team
+    - name: Set folder permissions for team via token
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/folders/{{ created_folder.folder.uid }}/permissions"
         method: POST
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
         headers: "{{ grafana_auth_headers }}"
         body_format: json
         body:
