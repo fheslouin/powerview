@@ -18,13 +18,12 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 0,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "influxdb-adecwatts-datasource",
-        "uid": "{{ datasource_uid }}"
+        "uid": "P26BF481922FC7B18"
       },
       "fieldConfig": {
         "defaults": {
@@ -40,18 +39,15 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 21,
-            "gradientMode": "opacity",
+            "fillOpacity": 0,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "smooth",
-            "lineStyle": {
-              "fill": "solid"
-            },
+            "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -81,13 +77,12 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "watt"
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 16,
+        "h": 12,
         "w": 24,
         "x": 0,
         "y": 0
@@ -96,13 +91,10 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
+          "displayMode": "table",
+          "placement": "right",
           "showLegend": true
         },
-        "timezone": [
-          "utc"
-        ],
         "tooltip": {
           "hideZeros": false,
           "mode": "single",
@@ -112,36 +104,15 @@
       "pluginVersion": "12.2.1",
       "targets": [
         {
-          "dataset": "iox",
           "datasource": {
             "type": "influxdb-adecwatts-datasource",
-            "uid": "{{ datasource_uid }}"
+            "uid": "P26BF481922FC7B18"
           },
-          "editorMode": "code",
-          "format": "time_series",
-          "hide": false,
-          "rawQuery": true,
-          "rawSql": "SELECT\n  value AS \"SN\",\n  time,\n  CONCAT(device, ' - Ch: ', channel_name) as device_channel\nFROM\n  ${__dashboard.name}\nWHERE\n  CONCAT('Device: ', device, ' - Ch: ', channel_name) IN (${channels:singlequote})\nORDER BY time",
-          "refId": "B",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
-                },
-                "type": "groupBy"
-              }
-            ]
-          }
+          "query": "from(bucket:\"company1\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
+          "refId": "A"
         }
       ],
-      "title": "Consommation par voie (W)",
+      "title": "Channels",
       "type": "timeseries"
     }
   ],
@@ -149,41 +120,14 @@
   "schemaVersion": 42,
   "tags": [],
   "templating": {
-    "list": [
-      {
-        "allowCustomValue": false,
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "type": "influxdb-adecwatts-datasource",
-          "uid": "{{ datasource_uid }}"
-        },
-        "definition": "SELECT DISTINCT\n  CONCAT('Device: ', device, ' - Ch: ', channel_name) AS field_label,\n  unit\nFROM\n  ${__dashboard.name}\nWHERE\n  time >= $__timeFrom\n  AND time <= $__timeTo\n  AND unit = 'W'\nORDER BY\n  field_label\n",
-        "description": "Query all channels available",
-        "includeAll": true,
-        "multi": true,
-        "name": "channels",
-        "options": [],
-        "query": {
-          "query": "SELECT DISTINCT\n  CONCAT('Device: ', device, ' - Ch: ', channel_name) AS field_label,\n  unit\nFROM\n  ${__dashboard.name}\nWHERE\n  time >= $__timeFrom\n  AND time <= $__timeTo\n  AND unit = 'W'\nORDER BY\n  field_label\n",
-          "refId": "InfluxVariableQueryEditor-VariableQuery"
-        },
-        "refresh": 2,
-        "regex": "",
-        "type": "query"
-      }
-    ]
+    "list": []
   },
   "time": {
-    "from": "2025-10-11T09:56:07.500Z",
-    "to": "2025-10-19T01:56:07.500Z"
+    "from": "2025-03-08T03:20:00.000Z",
+    "to": "2025-03-09T00:18:00.875Z"
   },
   "timepicker": {},
-  "timezone": "utc",
-  "title": "{{ dashboard_campaign_name }}",
-  "uid": "",
-  "version": 10,
-  "weekStart": "monday"
+  "timezone": "browser",
+  "title": "Visualisation Powerview",
+  "version": 0
 }

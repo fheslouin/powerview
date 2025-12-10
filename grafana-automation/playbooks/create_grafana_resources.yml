@@ -19,6 +19,10 @@
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
 
+    # Nouveau : fichier temporaire pour le dashboard overview
+    overview_template: "/srv/powerview/grafana-automation/templates/powerview-overview.json"
+    overview_json_file: "/srv/powerview/dashboard_overview.json"
+
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
     grafana_auth_headers: >-
       {{
@@ -245,6 +249,13 @@
 
     - name: Modify Grafana dashboard JSON
       ansible.builtin.shell: |
+        set -euo pipefail
+
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "jq n'est pas installé sur ce système (requis pour modifier le dashboard JSON)" >&2
+          exit 1
+        fi
+
         jq 'del(.dashboard.version)
             | del(.dashboard.id)
             | del(.dashboard.uid)
@@ -259,6 +270,21 @@
         executable: /bin/bash
       when: not dashboard_created.stat.exists
 
+    - name: Debug generated dashboard JSON (first 40 lines)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        head -n 40 "{{ json_file }}" || true
+      args:
+        executable: /bin/bash
+      register: debug_dashboard_json
+      changed_when: false
+      when: not dashboard_created.stat.exists
+
+    - name: Show generated dashboard JSON snippet
+      ansible.builtin.debug:
+        var: debug_dashboard_json.stdout
+      when: not dashboard_created.stat.exists
+
     - name: Import dashboard from templated JSON
       community.grafana.grafana_dashboard:
         url: "{{ grafana_url }}"
@@ -271,6 +297,46 @@
         overwrite: true
         validate_certs: false
       register: imported_dashboard
+      when: not dashboard_created.stat.exists
+
+    # ------------------------------------------------------------------
+    # Dashboard OVERVIEW par client (à partir du template powerview-overview.json)
+    # ------------------------------------------------------------------
+
+    - name: Build overview dashboard JSON from template
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "jq n'est pas installé sur ce système (requis pour modifier le dashboard overview)" >&2
+          exit 1
+        fi
+
+        jq '
+          .title = "Overview {{ company_name }}" |
+          (..|objects
+            | select(has("datasource") and .datasource.type=="influxdb-adecwatts-datasource")
+            | .datasource.uid = "{{ created_datasource.datasource.uid }}" ) |
+          (..|objects
+            | select(has("query"))
+            | .query |= sub("from\\(bucket:\\\"company1\\\"\\)"; "from(bucket:\\\"{{ company_name }}\\\")")
+        ' "{{ overview_template }}" > "{{ overview_json_file }}"
+      args:
+        executable: /bin/bash
+      when: not dashboard_created.stat.exists
+
+    - name: Import overview dashboard for company
+      community.grafana.grafana_dashboard:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        state: present
+        path: "{{ overview_json_file }}"
+        folder: "{{ company_name }}"
+        uid: '{{ lookup("pipe", "uuidgen") }}'
+        overwrite: true
+        validate_certs: false
+      register: imported_overview
       when: not dashboard_created.stat.exists
 
     # ------------------------------------------------------------------
@@ -318,6 +384,7 @@
       loop:
         - "{{ json_file }}"
         - "{{ exported_dashboard_json_file }}"
+        - "{{ overview_json_file }}"
       when: not dashboard_created.stat.exists
 
     - name: Touch a file -> Dashboard created
@@ -335,4 +402,5 @@
           - "Team: {{ company_name }} (id={{ grafana_team_id }})"
           - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
           - "Dashboard: {{ campaign_name }}"
+          - "Overview dashboard: Overview {{ company_name }}"
           - "Folder: {{ company_name }}"
