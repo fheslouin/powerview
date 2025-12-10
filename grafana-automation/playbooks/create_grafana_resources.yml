@@ -15,14 +15,12 @@
     influxdb_org: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ORG') }}"
     influxdb_host: "{{ lookup('ansible.builtin.env', 'INFLUXDB_HOST') }}"
 
-    json_file: "/srv/powerview/dashboard_master.json"
-    exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
 
-    # Fichier temporaire pour le dashboard overview
-    # IMPORTANT : chemin basé sur le répertoire du playbook pour éviter les problèmes de déploiement
-    overview_template: "{{ playbook_dir }}/../templates/powerview-overview.json"
-    overview_json_file: "/srv/powerview/dashboard_overview.json"
+    # Template Jinja pour les dashboards (campagne + overview)
+    dashboard_template: "{{ playbook_dir }}/../templates/dashboard.json.j2"
+    campaign_dashboard_json: "/srv/powerview/dashboard_campaign.json"
+    overview_dashboard_json: "/srv/powerview/dashboard_overview.json"
 
     # UIDs déterministes pour l'idempotence des dashboards
     campaign_dashboard_uid: "powerview_{{ company_name }}_{{ campaign_name }}"
@@ -162,7 +160,7 @@
       when: not dashboard_created.stat.exists
 
     # ------------------------------------------------------------------
-    # Création du bucket, folder, datasource, dashboard
+    # Création du bucket, folder, datasource
     # ------------------------------------------------------------------
 
     - name: Ensure InfluxDB bucket exists for company (idempotent, via Python parser)
@@ -222,7 +220,7 @@
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
         ds_type: influxdb
-        ds_url: "{{ influxdb_url | default('http://influxdb:8086') }}"
+        ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
         access: proxy
         is_default: false
         additional_json_data:
@@ -233,10 +231,8 @@
           httpMode: "POST"
           httpHeaderName1: "Authorization"
           readOnly: true
-          # Filtre de campagne par défaut : on met la campagne courante
           campaignsFilter:
             - "{{ campaign_name }}"
-          # Listes avancées laissées vides par défaut (à remplir plus tard si besoin)
           channelsList: []
           triphasicList: []
           virtualSeries: []
@@ -275,72 +271,47 @@
         validate_certs: false
       when: not dashboard_created.stat.exists
 
-    - name: Export master dashboard as JSON file
-      community.grafana.grafana_dashboard:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        state: export
-        path: "{{ exported_dashboard_json_file }}"
-        uid: "adq2j6z"
-        validate_certs: false
-      register: exported_dashboard
+    # ------------------------------------------------------------------
+    # Dashboards (campagne + overview) via template Jinja
+    # ------------------------------------------------------------------
+
+    - name: Ensure dashboard template exists
+      ansible.builtin.stat:
+        path: "{{ dashboard_template }}"
+      register: dashboard_template_stat
       when: not dashboard_created.stat.exists
 
-    - name: Modify Grafana dashboard JSON
-      ansible.builtin.shell: |
-        set -euo pipefail
+    - name: Fail if dashboard template is missing
+      ansible.builtin.fail:
+        msg: >
+          Le template de dashboard est introuvable :
+          {{ dashboard_template }}
+          Assure-toi que le fichier 'grafana-automation/templates/dashboard.json.j2'
+          est bien présent sur le serveur.
+      when:
+        - not dashboard_created.stat.exists
+        - not dashboard_template_stat.stat.exists
 
-        if ! command -v jq >/dev/null 2>&1; then
-          echo "jq n'est pas installé sur ce système (requis pour modifier le dashboard JSON)" >&2
-          exit 1
-        fi
+    - name: Render campaign dashboard JSON from template
+      ansible.builtin.template:
+        src: "{{ dashboard_template }}"
+        dest: "{{ campaign_dashboard_json }}"
+        mode: "0644"
+      vars:
+        company_name: "{{ company_name }}"
+        campaign_name: "{{ campaign_name }}"
+        datasource_uid: "{{ created_datasource.datasource.uid }}"
+      when:
+        - not dashboard_created.stat.exists
+        - dashboard_template_stat.stat.exists
 
-        jq '
-          del(.dashboard.version)
-          | del(.dashboard.id)
-          | .dashboard.uid = "{{ campaign_dashboard_uid }}"
-          | del(.meta)
-          | .dashboard.title = "{{ campaign_name }}"
-          | walk(
-              if type == "object"
-                 and has("type")
-                 and has("uid")
-                 and .type == "influxdb"
-              then
-                .type = "influxdb-adecwatts-datasource"
-                | .uid = "{{ created_datasource.datasource.uid }}"
-              else
-                .
-              end
-            )
-        ' "{{ exported_dashboard_json_file }}" > "{{ json_file }}"
-      args:
-        executable: /bin/bash
-      when: not dashboard_created.stat.exists
-
-    - name: Debug generated dashboard JSON (first 40 lines)
-      ansible.builtin.shell: |
-        set -euo pipefail
-        head -n 40 "{{ json_file }}" || true
-      args:
-        executable: /bin/bash
-      register: debug_dashboard_json
-      changed_when: false
-      when: not dashboard_created.stat.exists
-
-    - name: Show generated dashboard JSON snippet
-      ansible.builtin.debug:
-        var: debug_dashboard_json.stdout
-      when: not dashboard_created.stat.exists
-
-    - name: Import dashboard from templated JSON (idempotent via UID fixe)
+    - name: Import campaign dashboard (idempotent via UID fixe)
       community.grafana.grafana_dashboard:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         state: present
-        path: "{{ json_file }}"
+        path: "{{ campaign_dashboard_json }}"
         folder: "{{ company_name }}"
         uid: "{{ campaign_dashboard_uid }}"
         overwrite: true
@@ -348,65 +319,18 @@
       register: imported_dashboard
       when: not dashboard_created.stat.exists
 
-    # ------------------------------------------------------------------
-    # Dashboard OVERVIEW par client (à partir du template powerview-overview.json)
-    # ------------------------------------------------------------------
-
-    - name: Ensure overview template exists
-      ansible.builtin.stat:
-        path: "{{ overview_template }}"
-      register: overview_template_stat
-      when: not dashboard_created.stat.exists
-
-    - name: Fail if overview template is missing
-      ansible.builtin.fail:
-        msg: >
-          Le template de dashboard overview est introuvable :
-          {{ overview_template }}
-          Assure-toi que le fichier 'grafana-automation/templates/powerview-overview.json'
-          est bien présent sur le serveur (par ex. sous /srv/powerview).
+    - name: Render overview dashboard JSON from template
+      ansible.builtin.template:
+        src: "{{ dashboard_template }}"
+        dest: "{{ overview_dashboard_json }}"
+        mode: "0644"
+      vars:
+        company_name: "{{ company_name }}"
+        campaign_name: "Overview {{ company_name }}"
+        datasource_uid: "{{ created_datasource.datasource.uid }}"
       when:
         - not dashboard_created.stat.exists
-        - not overview_template_stat.stat.exists
-
-    - name: Build overview dashboard JSON from template
-      ansible.builtin.shell: |
-        set -euo pipefail
-
-        if ! command -v jq >/dev/null 2>&1; then
-          echo "jq n'est pas installé sur ce système (requis pour modifier le dashboard overview)" >&2
-          exit 1
-        fi
-
-        jq '
-          .uid = "{{ overview_dashboard_uid }}"
-          | .title = "Overview {{ company_name }}"
-          | walk(
-              if type == "object"
-                 and has("datasource")
-                 and .datasource.type == "influxdb-adecwatts-datasource"
-              then
-                .datasource.uid = "{{ created_datasource.datasource.uid }}"
-              else
-                .
-              end
-            )
-          | walk(
-              if type == "object"
-                 and has("query")
-                 and (.query | type == "string")
-              then
-                .query |= sub("from\\(bucket:\\\"company1\\\"\\)"; "from(bucket:\\\"{{ company_name }}\\\")")
-              else
-                .
-              end
-            )
-        ' "{{ overview_template }}" > "{{ overview_json_file }}"
-      args:
-        executable: /bin/bash
-      when:
-        - not dashboard_created.stat.exists
-        - overview_template_stat.stat.exists
+        - dashboard_template_stat.stat.exists
 
     - name: Import overview dashboard for company (idempotent via UID fixe)
       community.grafana.grafana_dashboard:
@@ -414,7 +338,7 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         state: present
-        path: "{{ overview_json_file }}"
+        path: "{{ overview_dashboard_json }}"
         folder: "{{ company_name }}"
         uid: "{{ overview_dashboard_uid }}"
         overwrite: true
@@ -459,14 +383,13 @@
     # Nettoyage + marqueur .dashboard.created
     # ------------------------------------------------------------------
 
-    - name: Clean up temporary dashboard file
+    - name: Clean up temporary dashboard files
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
-        - "{{ json_file }}"
-        - "{{ exported_dashboard_json_file }}"
-        - "{{ overview_json_file }}"
+        - "{{ campaign_dashboard_json }}"
+        - "{{ overview_dashboard_json }}"
       when: not dashboard_created.stat.exists
 
     - name: Ensure campaign directory exists
