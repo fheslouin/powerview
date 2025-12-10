@@ -61,17 +61,24 @@ cp .env.sample .env
 * Définir `INFLUXDB_ADMIN_TOKEN` **avec un token All Access (token root) de ton instance InfluxDB**
   * ce token est utilisé :
     * par le parseur TSV (`tsv_parser.py`) pour créer les buckets et écrire les points ;
-    * par les datasources Grafana créées automatiquement (une datasource `influxdb_<company>` par client).
+    * par la CLI `influx` (config root) utilisée par `manage_influx_tokens.py` pour créer les tokens dédiés par bucket.
 * Vérifier / ajuster :
   * `INFLUXDB_HOST` (URL InfluxDB accessible depuis le parseur et Ansible, ex. `http://localhost:8086`)
   * `INFLUXDB_ORG` (nom de l’organisation InfluxDB, ex. `powerview`)
   * `GRAFANA_URL`, `GRAFANA_USERNAME`, `GRAFANA_PASSWORD`
 
-> Remarque : l’ancien modèle “un token InfluxDB dédié par bucket client” (via
-> `manage_influx_tokens.py`) n’est plus utilisé par défaut, car certaines
-> configurations InfluxDB restreignent la création d’authorizations (403).
-> PowerView utilise désormais un **token partagé** (`INFLUXDB_ADMIN_TOKEN`)
-> pour toutes les datasources Grafana.  
+> Remarque : le modèle actuel combine les deux approches :
+>
+> - `INFLUXDB_ADMIN_TOKEN` reste le **token root partagé** utilisé :
+>   - par le parseur TSV (`tsv_parser.py`) pour créer les buckets et écrire les points,
+>   - par la configuration de la CLI `influx` (profil root) pour permettre à
+>     `manage_influx_tokens.py` de créer des authorizations.
+> - le playbook Ansible `create_grafana_resources.yml` n’utilise plus directement
+>   `INFLUXDB_ADMIN_TOKEN` dans les datasources Grafana : il appelle
+>   `manage_influx_tokens.py` pour créer/récupérer un **token dédié par bucket**
+>   (`powerview_token_for_bucket_<company>`), qui est ensuite injecté dans la
+>   datasource `influxdb_<company>`.
+>
 > Les détails sont dans `grafana-automation/README.md`.
 
 ### Démarrer Grafana et InfluxDB
@@ -262,10 +269,25 @@ SFTPGo génère des événements à chaque upload de fichier ou création de dos
     * nom : `influxdb_<company_name>` ;
     * type de plugin : `influxdb-adecwatts-datasource` (plugin custom défini par `plugin.json`) ;
     * bucket par défaut : `<company_name>` dans InfluxDB ;
-    * **token InfluxDB partagé** : `INFLUXDB_ADMIN_TOKEN` (token root / All Access) ;
-  * exporte le dashboard maître Grafana utilisé comme référence (visible dans Grafana : Dashboard -> admin -> Master) ;
+    * **token InfluxDB dédié au bucket** : généré/récupéré par `manage_influx_tokens.py`
+      (`powerview_token_for_bucket_<company_name>`) et injecté dans la datasource ;
+  * exporte le dashboard maître Grafana utilisé comme référence (visible dans Grafana : Dashboard -> admin -> Master, UID `adq2j6z`) ;
   * modifie et importe le nouveau dashboard dans le dossier de la Team (en remplaçant type + uid de la datasource par ceux de `influxdb_<company_name>`) ;
   * applique les permissions sur le dashboard et le dossier pour la Team créée.
+
+> Important : le parseur écrit actuellement les points dans un **measurement unique**
+> nommé `electrical`, avec un **field par canal** :
+>
+> - measurement : `electrical`
+> - field : `"<channel_id>_<unit>"` (par ex. `M02001171_Ch1_M02001171_V`)
+> - tags principaux : `campaign`, `channel_id`, `channel_unit`, `channel_label`,
+>   `channel_name`, `device`, `device_type`, `device_subtype`,
+>   `device_master_sn`, `device_sn`, `file_name`, etc.
+>
+> Les dashboards Grafana (dashboard maître + dashboards clonés par Ansible)
+> doivent donc être construits pour ce schéma (measurement `electrical`,
+> champs nommés par canal), et non plus sur l’ancien modèle
+> “measurement = nom de campagne, field = value”.
 
 Une fois ces étapes terminées, un nouveau dashboard apparaît dans Grafana, basé sur les données importées par le parseur Python.
 
@@ -281,7 +303,9 @@ Pour chaque client (`company_name`) :
 * une **datasource InfluxDB dédiée** : `influxdb_<company_name>`
   * type de plugin : `influxdb-adecwatts-datasource` ;
   * bucket par défaut : `<company_name>` ;
-  * **token InfluxDB partagé** : `INFLUXDB_ADMIN_TOKEN` (token root / All Access) ;
+  * **token InfluxDB dédié** : token spécifique au bucket `<company_name>`
+    (`powerview_token_for_bucket_<company_name>`) créé/récupéré par
+    `manage_influx_tokens.py` ;
 * un ou plusieurs **dashboards** (un par campagne) dans le folder `company_name` ;
 * des **permissions** qui donnent à la team `company_name` un accès *viewer* au folder et aux dashboards.
 
@@ -297,7 +321,7 @@ Instance Grafana unique
     |      |       +-- Datasource "influxdb_company1"
     |      |       |      - plugin: influxdb-adecwatts-datasource
     |      |       |      - bucket: company1
-    |      |       |      - token: INFLUXDB_ADMIN_TOKEN (partagé)
+    |      |       |      - token: powerview_token_for_bucket_company1
     |      |       |
     |      |       +-- Dashboards: campaign1, campaign2, ...
     |
@@ -308,7 +332,7 @@ Instance Grafana unique
                    +-- Datasource "influxdb_company2"
                    |      - plugin: influxdb-adecwatts-datasource
                    |      - bucket: company2
-                   |      - token: INFLUXDB_ADMIN_TOKEN (partagé)
+                   |      - token: powerview_token_for_bucket_company2
                    |
                    +-- Dashboards: campaignA, campaignB, ...
 ```
@@ -365,10 +389,12 @@ Cette section résume le flux complet, de l’upload d’un fichier TSV jusqu’
      * crée le bucket InfluxDB `<company>` s’il n’existe pas encore (`create_bucket_if_not_exists`) ;
      * lit le header du TSV pour détecter le format (actuellement `MV_T302_V002`) ;
      * construit les mappings de canaux (device, numéro de canal, unité, etc.) ;
-     * parse toutes les lignes de données et crée des points InfluxDB :
-       * bucket = `<company>` ;
-       * measurement = `<campaign>` ;
-       * tags : `campaign`, `device_sn`, `device_master_sn`, `channel_id`, `channel_name`, `channel_label`, `channel_unit`, `device_type`, `device_subtype`, `device`, `file_name`, etc. ;
+     * parse toutes les lignes de données et crée des points InfluxDB via `core.BaseTSVParser.parse_data` :
+       * measurement = `electrical` ;
+       * field = `"<channel_id>_<unit>"` (par ex. `M02001171_Ch1_M02001171_V`) ;
+       * tags : `campaign`, `device_sn`, `device_master_sn`, `channel_id`, `channel_name`,
+         `channel_label`, `channel_unit`, `device_type`, `device_subtype`, `device`,
+         `file_name`, etc. ;
      * écrit les points dans InfluxDB (`write_points`) ;
      * calcule une plage temporelle [start, end] à partir de la colonne timestamp du TSV ;
      * compte les points réellement présents dans InfluxDB pour ce fichier (`count_points_for_file`) et loggue un message de vérification ;
@@ -407,7 +433,7 @@ Cette section résume le flux complet, de l’upload d’un fichier TSV jusqu’
        * `INFLUXDB_HOST` (URL),
        * l’organisation `INFLUXDB_ORG`,
        * le bucket par défaut `<company>`,
-       * le token partagé `INFLUXDB_ADMIN_TOKEN` ;
+       * un **token dédié au bucket `<company>`** généré/récupéré par `manage_influx_tokens.py` ;
      * exporte un dashboard maître, le duplique et l’adapte pour la campagne (`title = <campaign>`, datasource mise à jour vers `influxdb_<company>` avec type `influxdb-adecwatts-datasource`) ;
      * importe ce nouveau dashboard dans le folder `<company>` ;
      * applique les permissions (la team `<company>` a accès en lecture au folder et au dashboard) ;
@@ -416,13 +442,24 @@ Cette section résume le flux complet, de l’upload d’un fichier TSV jusqu’
 7. **Visualisation dans Grafana**
    * Les dashboards créés automatiquement utilisent des requêtes (SQL ou Flux selon le plugin) basées sur :
      * le bucket = `<company>` (configuré dans la datasource),
-     * le measurement = `<campaign>` (nom du dashboard),
-     * les tags (`device_master_sn`, `channel_name`, `channel_label`, `channel_unit`, etc.).
+     * le measurement = `electrical`,
+     * les tags (`campaign`, `device_master_sn`, `channel_name`, `channel_label`, `channel_unit`, etc.),
+     * les fields `"<channel_id>_<unit>"`.
    * Dès que les fichiers TSV sont parsés et injectés, les données deviennent visibles dans Grafana via ces dashboards.
 
 ## Divers
 
 ### Exemple de requêtes Flux Grafana
+
+Ces exemples supposent un schéma de données basé sur :
+
+- bucket = `<company>`
+- measurement = `${__dashboard.name}` (ancien modèle)
+- field = `value`
+
+Ils sont conservés ici à titre d’exemple, mais **ne correspondent plus exactement**
+au schéma actuel (measurement `electrical`, fields `"<channel_id>_<unit>"`).
+Adapte‑les si tu utilises Flux avec le plugin `influxdb-adecwatts-datasource`.
 
 Pour obtenir toutes les voies en variable de dashboard :
 

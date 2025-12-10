@@ -19,9 +19,22 @@
     data_path: "/srv/sftpgo/data"
 
   tasks:
+    - name: Validate required variables company_name and campaign_name
+      ansible.builtin.assert:
+        that:
+          - company_name is defined
+          - campaign_name is defined
+          - company_name | length > 0
+          - campaign_name | length > 0
+        fail_msg: >
+          Les variables 'company_name' et 'campaign_name' doivent être fournies,
+          par exemple :
+          ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml
+          --extra-vars "company_name=company1 campaign_name=campaign1"
+
     - name: Check if dashboard created file exists
       stat:
-        path: "{{ data_path }}/{{ company_name }}/{{campaign_name}}/.dashboard.created"
+        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
       register: dashboard_created
 
     - name: Create Grafana Team
@@ -48,8 +61,9 @@
         state: present
         validate_certs: false
       register: created_folder
-      when: not created_team.status | default(omit)== 409
-        and not dashboard_created.stat.exists
+      when:
+        - not dashboard_created.stat.exists
+        - (created_team.status | default(200)) != 409
 
     - name: Ensure InfluxDB bucket exists for company (idempotent, via Python parser)
       ansible.builtin.debug:
@@ -57,9 +71,42 @@
           Le bucket InfluxDB '{{ company_name }}' doit déjà exister
           (créé automatiquement par tsv_parser.py via create_bucket_if_not_exists).
 
-    # NOTE: on ne crée plus de token dédié par bucket via manage_influx_tokens.py.
-    # La datasource utilisera directement INFLUXDB_ADMIN_TOKEN (ou un token All Access
-    # que tu auras configuré dans .env).
+    # ------------------------------------------------------------------
+    # Gestion du token InfluxDB dédié au bucket via manage_influx_tokens.py
+    # ------------------------------------------------------------------
+
+    - name: Ensure manage_influx_tokens.py is present
+      ansible.builtin.stat:
+        path: "/srv/powerview/manage_influx_tokens.py"
+      register: manage_tokens_script
+      when: not dashboard_created.stat.exists
+
+    - name: Fail if manage_influx_tokens.py is missing
+      ansible.builtin.fail:
+        msg: "Le script /srv/powerview/manage_influx_tokens.py est introuvable. Impossible de gérer le token InfluxDB dédié au bucket {{ company_name }}."
+      when:
+        - not dashboard_created.stat.exists
+        - not manage_tokens_script.stat.exists
+
+    - name: Create or get dedicated InfluxDB token for bucket
+      ansible.builtin.command: >
+        python3 /srv/powerview/manage_influx_tokens.py
+        --bucket {{ company_name }}
+      register: bucket_token_cmd
+      changed_when: false
+      when: not dashboard_created.stat.exists
+
+    - name: Set fact for bucket token
+      ansible.builtin.set_fact:
+        influxdb_bucket_token: "{{ bucket_token_cmd.stdout | trim }}"
+      when: not dashboard_created.stat.exists
+
+    - name: Debug bucket token (masqué)
+      ansible.builtin.debug:
+        msg: "Token dédié récupéré pour le bucket {{ company_name }} (longueur={{ influxdb_bucket_token | length }})"
+        verbosity: 1
+      no_log: true
+      when: not dashboard_created.stat.exists
 
     - name: Create InfluxDB datasource (plugin influxdb-adecwatts-datasource)
       community.grafana.grafana_datasource:
@@ -77,7 +124,7 @@
           defaultBucket: "{{ company_name }}"
           tlsSkipVerify: false
         additional_secure_json_data:
-          token: "{{ influxdb_admin_token }}"
+          token: "{{ influxdb_bucket_token }}"
         state: present
         validate_certs: false
       register: created_datasource
@@ -89,7 +136,7 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         state: export
-        path: "{{ exported_dashboard_json_file}}"
+        path: "{{ exported_dashboard_json_file }}"
         uid: "adq2j6z"
         validate_certs: false
       register: exported_dashboard
@@ -128,7 +175,7 @@
 
     - name: Set dashboard permissions for team (viewer role)
       ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/dashboards/uid/{{imported_dashboard.uid}}/permissions"
+        url: "{{ grafana_url }}/api/dashboards/uid/{{ imported_dashboard.uid }}/permissions"
         method: POST
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
@@ -140,8 +187,9 @@
               permission: 1
         status_code: 200
         validate_certs: false
-      when: not created_team.status | default(omit)== 409
-        and not dashboard_created.stat.exists
+      when:
+        - not dashboard_created.stat.exists
+        - (created_team.status | default(200)) != 409
 
     - name: Set folder permissions for team
       ansible.builtin.uri:
@@ -157,8 +205,9 @@
               permission: 1
         status_code: 200
         validate_certs: false
-      when: not created_team.status | default(omit) == 409
-        and not dashboard_created.stat.exists
+      when:
+        - not dashboard_created.stat.exists
+        - (created_team.status | default(200)) == 409
 
     - name: Clean up temporary dashboard file
       ansible.builtin.file:
@@ -171,7 +220,7 @@
 
     - name: Touch a file -> Dashboard created
       ansible.builtin.file:
-        path: "{{ data_path }}/{{ company_name }}/{{campaign_name}}/.dashboard.created"
+        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
         state: touch
       when: not dashboard_created.stat.exists
 
@@ -182,6 +231,6 @@
           - "Grafana Resources Created Successfully!"
           - "============================================"
           - "Team: {{ company_name }}"
-          - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token = INFLUXDB_ADMIN_TOKEN partagé)"
+          - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
           - "Dashboard: {{ campaign_name }}"
           - "Folder: {{ company_name }}"
