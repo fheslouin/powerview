@@ -382,8 +382,9 @@
     # ------------------------------------------------------------------
     # Permissions via team (créée ou existante)
     # ------------------------------------------------------------------
+    # permission: 1 = Viewer, 2 = Editor, 4 = Admin
 
-    - name: Set dashboard permissions for team (viewer role)
+    - name: Set dashboard permissions for team (editor role)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ imported_dashboard.uid }}/permissions"
         method: POST
@@ -392,13 +393,13 @@
         body:
           items:
             - teamId: "{{ grafana_team_id }}"
-              permission: 1
+              permission: 2
         status_code: 200
         validate_certs: false
       when:
         - not dashboard_created.stat.exists
 
-    - name: Set folder permissions for team
+    - name: Set folder permissions for team (editor role)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/folders/{{ created_folder.folder.uid }}/permissions"
         method: POST
@@ -407,7 +408,7 @@
         body:
           items:
             - teamId: "{{ grafana_team_id }}"
-              permission: 1
+              permission: 2
         status_code: 200
         validate_certs: false
       when: not dashboard_created.stat.exists
@@ -450,4 +451,5 @@
           - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
           - "Folder: {{ company_name }}"
           - "User (team admin): login='{{ company_admin_login }}', email='{{ company_admin_email }}'"
+          - "Team permissions: Editor sur le folder et le dashboard"
       when: not dashboard_created.stat.exists
