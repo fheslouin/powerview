@@ -217,16 +217,28 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "influxdb_{{ company_name }}"
-        ds_type: influxdb
+        ds_type: influxdb-adecwatts-datasource
         ds_url: "{{ influxdb_host | default('http://influxdb:8086') }}"
-        basic_auth_user: "{{ influxdb_username }}"
-        basic_auth_password: "{{ influxdb_password }}"
+        access: proxy
+        is_default: false
+        basic_auth: false
         additional_json_data:
           version: "Flux"
           organization: "{{ influxdb_org }}"
           defaultBucket: "{{ company_name }}"
-          tlsSkipVerify: false
+          tlsSkipVerify: true
+          httpMode: "POST"
+          httpHeaderName1: "Authorization"
+          readOnly: true
+          # Filtre de campagne par défaut : on met la campagne courante
+          campaignsFilter:
+            - "{{ campaign_name }}"
+          # Listes avancées laissées vides par défaut (à remplir plus tard si besoin)
+          channelsList: []
+          triphasicList: []
+          virtualSeries: []
         additional_secure_json_data:
+          httpHeaderValue1: "Token {{ influxdb_bucket_token }}"
           token: "{{ influxdb_bucket_token }}"
         state: present
         validate_certs: false
