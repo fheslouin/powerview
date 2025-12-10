@@ -211,6 +211,20 @@
       register: created_folder
       when: not dashboard_created.stat.exists
 
+    # ------------------------------------------------------------------
+    # Datasource InfluxDB : ne pas la recréer si elle existe déjà
+    # ------------------------------------------------------------------
+
+    - name: Check if InfluxDB datasource already exists
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: [200, 404]
+        validate_certs: false
+      register: existing_ds
+      when: not dashboard_created.stat.exists
+
     - name: Create InfluxDB datasource (créée comme influxdb, patchée ensuite en plugin custom)
       community.grafana.grafana_datasource:
         url: "{{ grafana_url }}"
@@ -240,7 +254,18 @@
         state: present
         validate_certs: false
       register: created_datasource
-      when: not dashboard_created.stat.exists
+      when:
+        - not dashboard_created.stat.exists
+        - existing_ds.status == 404
+
+    - name: Set fact for datasource when it already exists
+      ansible.builtin.set_fact:
+        created_datasource:
+          datasource:
+            uid: "{{ existing_ds.json.uid }}"
+      when:
+        - not dashboard_created.stat.exists
+        - existing_ds.status == 200
 
     - name: Get created datasource by name
       ansible.builtin.uri:
