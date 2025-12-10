@@ -8,6 +8,7 @@
     grafana_url: "{{ lookup('ansible.builtin.env', 'GRAFANA_URL') }}"
     grafana_username: "{{ lookup('ansible.builtin.env', 'GRAFANA_USERNAME') }}"
     grafana_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_PASSWORD') }}"
+    grafana_api_token: "{{ lookup('ansible.builtin.env', 'GRAFANA_API_TOKEN') | default('', true) }}"
     influxdb_admin_token: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ADMIN_TOKEN') }}"
     influxdb_username: "{{ lookup('ansible.builtin.env', 'INFLUXDB_USERNAME') }}"
     influxdb_password: "{{ lookup('ansible.builtin.env', 'INFLUXDB_PASSWORD') }}"
@@ -17,6 +18,13 @@
     json_file: "/srv/powerview/dashboard_master.json"
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
+
+    # Headers d'auth Grafana si on utilise un token API
+    grafana_auth_headers: >-
+      {{
+        {} if (grafana_api_token | length == 0)
+        else {'Authorization': 'Bearer ' ~ grafana_api_token}
+      }}
 
   tasks:
     - name: Validate required variables company_name and campaign_name
@@ -38,14 +46,16 @@
           - "GRAFANA_URL={{ grafana_url }}"
           - "GRAFANA_USERNAME={{ grafana_username }}"
           - "GRAFANA_PASSWORD est défini: {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
+          - "GRAFANA_API_TOKEN est défini: {{ grafana_api_token | length > 0 }}"
 
     - name: Check Grafana health (auth + URL)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/health"
         method: GET
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
+        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
+        headers: "{{ grafana_auth_headers }}"
+        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         status_code: 200
         validate_certs: false
       register: grafana_health
@@ -60,9 +70,10 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/teams"
         method: POST
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
+        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
+        headers: "{{ grafana_auth_headers }}"
+        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         body_format: json
         body:
           name: "{{ company_name }}"
@@ -74,8 +85,10 @@
     - name: Create Grafana folder for team
       community.grafana.grafana_folder:
         url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
+        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
+        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
+        # Le module community.grafana ne supporte pas encore les headers custom,
+        # donc pour l'instant il nécessite login/mot de passe.
         title: "{{ company_name }}"
         state: present
         validate_certs: false
@@ -196,9 +209,10 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ imported_dashboard.uid }}/permissions"
         method: POST
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
+        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
+        headers: "{{ grafana_auth_headers }}"
+        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         body_format: json
         body:
           items:
@@ -214,9 +228,10 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/folders/{{ created_folder.folder.uid }}/permissions"
         method: POST
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        force_basic_auth: true
+        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
+        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
+        headers: "{{ grafana_auth_headers }}"
+        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         body_format: json
         body:
           items:
