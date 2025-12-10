@@ -181,17 +181,34 @@
       register: company_user
       when: not dashboard_created.stat.exists
 
-    - name: Ajouter l'utilisateur à la team (membre de la team uniquement)
-      community.grafana.grafana_team:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        name: "{{ company_name }}"
-        email: "{{ company_admin_email }}"
-        members:
-          - "{{ company_admin_login }}"
-        state: present
+    - name: Récupérer l'ID de l'utilisateur pour l'ajouter à la team
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ company_admin_login }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
         validate_certs: false
+      register: company_user_info
+      when: not dashboard_created.stat.exists
+
+    - name: Ajouter l'utilisateur à la team via l'API REST
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams/{{ grafana_team_id }}/members"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ grafana_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          userId: "{{ company_user_info.json.id }}"
+        status_code: [200, 409]
+        validate_certs: false
+      register: add_member_result
+      when: not dashboard_created.stat.exists
+
+    - name: Debug ajout membre team
+      ansible.builtin.debug:
+        var: add_member_result
       when: not dashboard_created.stat.exists
 
     # ------------------------------------------------------------------
