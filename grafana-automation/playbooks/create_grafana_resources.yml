@@ -20,8 +20,8 @@
     data_path: "/srv/sftpgo/data"
 
     # Fichier temporaire pour le dashboard overview
-    # IMPORTANT : chemin RELATIF au répertoire du projet (playbook lancé depuis /srv/powerview)
-    overview_template: "grafana-automation/templates/powerview-overview.json"
+    # IMPORTANT : chemin ABSOLU, pour éviter les problèmes de répertoire courant
+    overview_template: "/srv/powerview/grafana-automation/templates/powerview-overview.json"
     overview_json_file: "/srv/powerview/dashboard_overview.json"
 
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
