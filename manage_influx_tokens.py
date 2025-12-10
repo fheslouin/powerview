@@ -38,6 +38,34 @@ def _get_env(name: str) -> str:
     return value
 
 
+def _print_debug_env(url: str, org: str) -> None:
+    """
+    Affiche sur stderr les infos de connexion utilisées, pour debug.
+    """
+    print(
+        f"[manage_influx_tokens] INFLUXDB_HOST = {url}",
+        file=sys.stderr,
+    )
+    print(
+        f"[manage_influx_tokens] INFLUXDB_ORG  = {org}",
+        file=sys.stderr,
+    )
+
+
+def _extract_error_body(e: ApiException) -> str:
+    """
+    Essaie d'extraire le corps JSON/texte de la réponse InfluxDB
+    pour l'afficher dans les messages d'erreur.
+    """
+    try:
+        data = e.body
+        if not data:
+            return ""
+        return str(data).strip()
+    except Exception:
+        return ""
+
+
 def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
     """
     Retourne un token existant pour ce bucket (si trouvé via la description),
@@ -51,6 +79,7 @@ def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
     try:
         existing = auth_api.find_authorizations()
     except ApiException as e:
+        body = _extract_error_body(e)
         if e.status == 403:
             print(
                 "Erreur 403 InfluxDB: le token INFLUXDB_ADMIN_TOKEN n'a pas les "
@@ -59,8 +88,13 @@ def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
                 "ou qu'il a au moins les droits sur 'authorizations/*'.",
                 file=sys.stderr,
             )
+            if body:
+                print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
             sys.exit(1)
-        raise
+        print(f"Erreur InfluxDB (find_authorizations): {e}", file=sys.stderr)
+        if body:
+            print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
+        sys.exit(1)
 
     for auth in existing or []:
         if getattr(auth, "description", None) == description and getattr(auth, "token", None):
@@ -97,20 +131,26 @@ def get_or_create_token_for_bucket(client, org_id, bucket_id, bucket_name):
     try:
         new_auth = auth_api.create_authorization(authorization=auth_body)
     except ApiException as e:
+        body = _extract_error_body(e)
         if e.status == 403:
             print(
                 "Erreur 403 InfluxDB lors de la création du token dédié au bucket.\n"
                 "Le token INFLUXDB_ADMIN_TOKEN n'a pas les permissions suffisantes pour "
                 "créer des authorizations.\n\n"
-                "Actions à faire dans InfluxDB :\n"
-                "  1) Aller dans 'Load Data' -> 'Tokens'.\n"
-                "  2) Créer (ou récupérer) un token 'All Access' pour l'organisation "
-                "utilisée par PowerView.\n"
-                "  3) Mettre ce token dans le fichier .env comme INFLUXDB_ADMIN_TOKEN.\n",
+                "Vérifie que :\n"
+                "  - le token est bien de type 'All Access',\n"
+                "  - il appartient à la même organisation que INFLUXDB_ORG,\n"
+                "  - INFLUXDB_HOST pointe bien vers la même instance InfluxDB.\n",
                 file=sys.stderr,
             )
+            if body:
+                print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
             sys.exit(1)
-        raise
+        print("Erreur InfluxDB lors de la création de l'authorization:", file=sys.stderr)
+        print(str(e), file=sys.stderr)
+        if body:
+            print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
+        sys.exit(1)
 
     if not new_auth.token:
         raise RuntimeError("Token non retourné par InfluxDB")
@@ -138,16 +178,12 @@ def find_bucket_id(client: InfluxDBClient, bucket_name: str, org: str) -> Option
 
     # Fallback : on tente un find_buckets() global si rien trouvé
     # (peut échouer si le token n'a pas les droits nécessaires)
-    try:
-        result_all = buckets_api.find_buckets()
-        buckets_all = getattr(result_all, "buckets", None) or []
-        for b in buckets_all:
-            name = getattr(b, "name", None)
-            if name == bucket_name:
-                return getattr(b, "id", None)
-    except ApiException as e:
-        # On ne fait que remonter l'erreur, elle sera gérée plus haut
-        raise
+    result_all = buckets_api.find_buckets()
+    buckets_all = getattr(result_all, "buckets", None) or []
+    for b in buckets_all:
+        name = getattr(b, "name", None)
+        if name == bucket_name:
+            return getattr(b, "id", None)
 
     return None
 
@@ -171,6 +207,9 @@ def main() -> None:
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
+    # Affiche les infos de connexion utilisées (debug)
+    _print_debug_env(url, org)
+
     client = InfluxDBClient(url=url, token=token, org=org)
 
     try:
@@ -178,6 +217,7 @@ def main() -> None:
         try:
             _ = client.buckets_api().find_buckets(limit=1)
         except ApiException as e:
+            body = _extract_error_body(e)
             if e.status == 403:
                 print(
                     "Erreur 403 InfluxDB: le token INFLUXDB_ADMIN_TOKEN n'a pas les "
@@ -186,6 +226,8 @@ def main() -> None:
                     "ou qu'il a au moins les droits read/write sur les buckets.",
                     file=sys.stderr,
                 )
+                if body:
+                    print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
                 sys.exit(1)
             elif e.status == 401:
                 print(
@@ -193,13 +235,16 @@ def main() -> None:
                     "(mauvais token ou org).",
                     file=sys.stderr,
                 )
+                if body:
+                    print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
                 sys.exit(1)
             else:
-                # Autre erreur API : on la remonte telle quelle
                 print(
                     f"Erreur InfluxDB lors de la vérification des buckets: {e}",
                     file=sys.stderr,
                 )
+                if body:
+                    print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
                 sys.exit(1)
 
         orgs_api = client.organizations_api()
@@ -211,6 +256,7 @@ def main() -> None:
         # orgs[0] est un objet Organization
         org_obj = orgs[0]
         org_id = getattr(org_obj, "id", None)
+        print(f"[manage_influx_tokens] Organisation trouvée: id={org_id}", file=sys.stderr)
         if not org_id:
             print(
                 f"Impossible de récupérer l'ID de l'organisation : {org}",
@@ -221,6 +267,7 @@ def main() -> None:
         try:
             bucket_id = find_bucket_id(client, args.bucket, org)
         except ApiException as e:
+            body = _extract_error_body(e)
             if e.status == 403:
                 print(
                     "Erreur 403 InfluxDB: le token INFLUXDB_ADMIN_TOKEN n'a pas les "
@@ -228,8 +275,13 @@ def main() -> None:
                     "Vérifie les permissions de ce token dans InfluxDB.",
                     file=sys.stderr,
                 )
+                if body:
+                    print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
                 sys.exit(1)
-            raise
+            print(f"Erreur InfluxDB lors de la recherche du bucket: {e}", file=sys.stderr)
+            if body:
+                print(f"Détail de la réponse InfluxDB: {body}", file=sys.stderr)
+            sys.exit(1)
 
         if bucket_id is None:
             print(
@@ -237,6 +289,8 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+
+        print(f"[manage_influx_tokens] Bucket '{args.bucket}' trouvé: id={bucket_id}", file=sys.stderr)
 
         # Création / récupération du token dédié au bucket
         bucket_token = get_or_create_token_for_bucket(
