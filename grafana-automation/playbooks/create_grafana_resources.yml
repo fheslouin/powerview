@@ -83,7 +83,7 @@
       failed_when: grafana_health.status != 200
 
     - name: Check if dashboard created file exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
       register: dashboard_created
 
@@ -431,12 +431,16 @@
         path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}"
         state: directory
         mode: "0755"
+      become: true
+      become_user: sftpgo
       when: not dashboard_created.stat.exists
 
     - name: Touch a file -> Dashboard created
       ansible.builtin.file:
         path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
         state: touch
+      become: true
+      become_user: sftpgo
       when: not dashboard_created.stat.exists
 
     - name: Display user credentials
