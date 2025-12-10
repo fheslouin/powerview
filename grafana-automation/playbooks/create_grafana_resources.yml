@@ -19,11 +19,9 @@
     exported_dashboard_json_file: "/srv/powerview/dashboard_exported.json"
     data_path: "/srv/sftpgo/data"
 
-    # Headers d'auth Grafana si on utilise un token API
     grafana_auth_headers: >-
       {{
-        {} if (grafana_api_token | length == 0)
-        else {'Authorization': 'Bearer ' ~ grafana_api_token}
+        {'Authorization': 'Bearer ' ~ grafana_api_token}
       }}
 
   tasks:
@@ -40,22 +38,28 @@
           ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml
           --extra-vars "company_name=company1 campaign_name=campaign1"
 
+    - name: Validate Grafana API token is set
+      ansible.builtin.assert:
+        that:
+          - grafana_api_token is defined
+          - grafana_api_token | length > 0
+        fail_msg: >
+          GRAFANA_API_TOKEN doit être défini dans l'environnement (.env) et
+          correspondre à un token de service account Grafana avec rôle Admin.
+
     - name: Debug Grafana connection settings
       ansible.builtin.debug:
         msg:
           - "GRAFANA_URL={{ grafana_url }}"
-          - "GRAFANA_USERNAME={{ grafana_username }}"
-          - "GRAFANA_PASSWORD est défini: {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
-          - "GRAFANA_API_TOKEN est défini: {{ grafana_api_token | length > 0 }}"
+          - "GRAFANA_API_TOKEN défini: {{ grafana_api_token | length > 0 }}"
+          - "GRAFANA_USERNAME (pour modules community.grafana)={{ grafana_username }}"
+          - "GRAFANA_PASSWORD défini (pour modules community.grafana): {{ (grafana_password is defined) and (grafana_password | length > 0) }}"
 
     - name: Check Grafana health (auth + URL)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/health"
         method: GET
-        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
-        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
         headers: "{{ grafana_auth_headers }}"
-        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         status_code: 200
         validate_certs: false
       register: grafana_health
@@ -70,25 +74,40 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/teams"
         method: POST
-        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
-        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
         headers: "{{ grafana_auth_headers }}"
-        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         body_format: json
         body:
           name: "{{ company_name }}"
-        status_code: [200, 409]
+        status_code: [200, 409, 401]
         validate_certs: false
       register: created_team
       when: not dashboard_created.stat.exists
+      ignore_errors: true
+
+    - name: Debug Create Grafana Team response
+      ansible.builtin.debug:
+        var: created_team
+      when: not dashboard_created.stat.exists
+
+    - name: Fail explicitly if team creation unauthorized
+      ansible.builtin.fail:
+        msg: >
+          Échec de la création de la team Grafana (company_name={{ company_name }}).
+          Status={{ created_team.status | default('n/a') }},
+          body={{ created_team.json | default(created_team.content | default('')) }}.
+          Vérifie que ton token Grafana (GRAFANA_API_TOKEN) a bien les droits Admin
+          (gestion des teams) et que la valeur est correcte.
+      when:
+        - not dashboard_created.stat.exists
+        - created_team is defined
+        - created_team.status is defined
+        - created_team.status not in [200, 409]
 
     - name: Create Grafana folder for team
       community.grafana.grafana_folder:
         url: "{{ grafana_url }}"
-        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
-        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
-        # Le module community.grafana ne supporte pas encore les headers custom,
-        # donc pour l'instant il nécessite login/mot de passe.
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
         title: "{{ company_name }}"
         state: present
         validate_certs: false
@@ -102,10 +121,6 @@
         msg: >
           Le bucket InfluxDB '{{ company_name }}' doit déjà exister
           (créé automatiquement par tsv_parser.py via create_bucket_if_not_exists).
-
-    # ------------------------------------------------------------------
-    # Gestion du token InfluxDB dédié au bucket via manage_influx_tokens.py
-    # ------------------------------------------------------------------
 
     - name: Ensure manage_influx_tokens.py is present
       ansible.builtin.stat:
@@ -181,7 +196,6 @@
             | del(.dashboard.uid)
             | del(.meta)
             | .dashboard.title = "{{ campaign_name }}"
-            # Met à jour type + uid pour toutes les datasources Influx
             | (..|objects
                | select(has("type") and has("uid") and .type=="influxdb")
                | .type = "influxdb-adecwatts-datasource"
@@ -209,10 +223,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ imported_dashboard.uid }}/permissions"
         method: POST
-        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
-        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
         headers: "{{ grafana_auth_headers }}"
-        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         body_format: json
         body:
           items:
@@ -228,10 +239,7 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/folders/{{ created_folder.folder.uid }}/permissions"
         method: POST
-        url_username: "{{ (grafana_api_token | length == 0) | ternary(grafana_username, omit) }}"
-        url_password: "{{ (grafana_api_token | length == 0) | ternary(grafana_password, omit) }}"
         headers: "{{ grafana_auth_headers }}"
-        force_basic_auth: "{{ (grafana_api_token | length == 0) | ternary(true, false) }}"
         body_format: json
         body:
           items:

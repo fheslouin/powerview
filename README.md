@@ -67,6 +67,16 @@ cp .env.sample .env
   * `INFLUXDB_ORG` (nom de l’organisation InfluxDB, ex. `powerview`)
   * `GRAFANA_URL`, `GRAFANA_USERNAME`, `GRAFANA_PASSWORD`
 
+> Remarque importante : en production derrière Caddy, `GRAFANA_URL` doit
+> généralement pointer vers l’URL HTTPS frontée par Caddy, par exemple :
+>
+> ```env
+> GRAFANA_URL='https://powerview.adecwatts.fr'
+> ```
+>
+> et non vers l’URL interne `http://powerview.adecwatts.fr:8088`.  
+> Cela évite les redirections HTTP 308 que Caddy applique automatiquement.
+
 > Remarque : le modèle actuel combine les deux approches :
 >
 > - `INFLUXDB_ADMIN_TOKEN` reste le **token root partagé** utilisé :
@@ -228,8 +238,8 @@ Le service SFTP est accessible sur le port 2022.
 
 Accéder à :
 
-* Grafana : http://powerview.adecwatts.fr:8088/ et créer un utilisateur admin.
-* SFTPGo : http://powerview.adecwatts.fr:8080/ et créer un utilisateur admin, puis un utilisateur client (par exemple `company1`).
+* Grafana : https://powerview.adecwatts.fr/ et créer un utilisateur admin.
+* SFTPGo : https://ftp.powerview.adecwatts.fr/ et créer un utilisateur admin, puis un utilisateur client (par exemple `company1`).
 
 Pour chaque fichier uploadé, l’arborescence cible est la suivante :
 
