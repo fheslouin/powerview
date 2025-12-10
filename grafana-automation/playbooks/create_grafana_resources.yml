@@ -426,6 +426,13 @@
         - "{{ overview_json_file }}"
       when: not dashboard_created.stat.exists
 
+    - name: Ensure campaign directory exists
+      ansible.builtin.file:
+        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}"
+        state: directory
+        mode: "0755"
+      when: not dashboard_created.stat.exists
+
     - name: Touch a file -> Dashboard created
       ansible.builtin.file:
         path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
