@@ -1,6 +1,18 @@
 version: "3.9"
 
 services:
+  powerview-config-api:
+    image: powerview-config-api:0.3.2
+    container_name: powerview-config-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Volume persistant pour la base SQLite du service de config séries
+      - config-api-data:/data
+    restart: unless-stopped
+
   influxdb2:
     image: influxdb:2
     container_name: influxdb
@@ -67,3 +79,4 @@ volumes:
   influxdb2-data:
   influxdb2-config:
   grafana-data:
+  config-api-data:
