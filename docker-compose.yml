@@ -51,24 +51,42 @@ services:
     env_file:
       - .env
     environment:
-      # ID du plugin = "influxdb-adecwatts-datasource" (plugin.json)
-      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "influxdb-adecwatts-datasource"
+      # Autoriser le chargement des plugins non signés (datasource + panel)
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "influxdb-adecwatts-datasource,adecwatts-series-config-panel"
+
       INFLUXDB_DATA_INDEX_VERSION: "tsi1"
+
       GF_INSTALL_PLUGINS: >
         grafana-clock-panel,
         grafana-influxdb-08-datasource,
         grafana-kairosdb-datasource,
         grafana-piechart-panel,
         volkovlabs-form-panel,
-        grafana-simple-json-datasource
+        grafana-simple-json-datasource,
+        marcusolsson-json-datasource
+
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
       # Paramètres utiles derrière le reverse proxy Caddy
       GF_SERVER_ROOT_URL: "%(protocol)s://powerview.adecwatts.fr/"
       GF_SERVER_DOMAIN: "powerview.adecwatts.fr"
     volumes:
       - grafana-data:/var/lib/grafana
-      # Plugins custom : on monte le dossier où on a copié le plugin
-      - /srv/grafana-plugins/influxdb-adecwatts-datasource:/var/lib/grafana/plugins/influxdb-adecwatts-datasource
+
+      # Datasource Powerview (plugin buildé et copié en prod)
+      # Exemple : scp -r dist/ ubuntu@37.59.124.77:/srv/grafana-plugins/influxdb-adecwatts-datasource
+      - /srv/grafana-plugins/influxdb-adecwatts-datasource:/var/lib/grafana/plugins/influxdb-adecwatts-datasource:ro
+
+      # Panel Powerview Series Config (panel/dist copié en prod)
+      # Exemple : scp -r panel/dist ubuntu@37.59.124.77:/srv/grafana-plugins/adecwatts-series-config-panel
+      - /srv/grafana-plugins/adecwatts-series-config-panel:/var/lib/grafana/plugins/adecwatts-series-config-panel:ro
+
+      # Provisioning Grafana (datasources, dashboards, etc.)
+      # Exemple : scp -r provisioning ubuntu@37.59.124.77:/srv/powerview/provisioning
+      #- /srv/powerview/provisioning:/etc/grafana/provisioning:ro
+
+      # Dashboards JSON (répertoire pointé par le provisioning dashboards)
+      # Exemple : scp -r dashboards ubuntu@37.59.124.77:/srv/powerview/dashboards
+      #- /srv/powerview/dashboards:/var/lib/grafana/dashboards/powerview:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
       interval: 30s
