@@ -82,7 +82,7 @@ services:
 
       # Provisioning Grafana (datasources, dashboards, etc.)
       # Exemple : scp -r provisioning ubuntu@37.59.124.77:/srv/powerview/provisioning
-      #- /srv/powerview/provisioning:/etc/grafana/provisioning:ro
+      - /srv/powerview/provisioning:/etc/grafana/provisioning:ro
 
       # Dashboards JSON (répertoire pointé par le provisioning dashboards)
       # Exemple : scp -r dashboards ubuntu@37.59.124.77:/srv/powerview/dashboards
