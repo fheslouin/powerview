@@ -86,7 +86,7 @@ services:
 
       # Dashboards JSON (répertoire pointé par le provisioning dashboards)
       # Exemple : scp -r dashboards ubuntu@37.59.124.77:/srv/powerview/dashboards
-      #- /srv/powerview/dashboards:/var/lib/grafana/dashboards/powerview:ro
+      - /srv/powerview/dashboards:/var/lib/grafana/dashboards/powerview:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
       interval: 30s
