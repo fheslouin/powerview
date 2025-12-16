@@ -87,10 +87,10 @@
       register: grafana_health
       failed_when: grafana_health.status != 200
 
-    - name: Check if dashboard created file exists
+    - name: Check if company created file exists
       ansible.builtin.stat:
-        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
-      register: dashboard_created
+        path: "{{ data_path }}/{{ company_name }}/.company.created"
+      register: company_created
 
     # ------------------------------------------------------------------
     # Création / récupération de la team Grafana
@@ -107,12 +107,12 @@
         status_code: [200, 409]
         validate_certs: false
       register: created_team
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Debug Create Grafana Team response
       ansible.builtin.debug:
         var: created_team
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: When team already exists (409), search team by name to get id
       ansible.builtin.uri:
@@ -123,7 +123,7 @@
         validate_certs: false
       register: team_search
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - created_team.status is defined
         - created_team.status == 409
 
@@ -133,7 +133,7 @@
           La team Grafana '{{ company_name }}' existe déjà (409) mais n'a pas pu être retrouvée
           via /api/teams/search. Vérifie manuellement dans Grafana.
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - created_team.status is defined
         - created_team.status == 409
         - (team_search.json.teams | default([]) | length) == 0
@@ -142,7 +142,7 @@
       ansible.builtin.set_fact:
         grafana_team_id: "{{ created_team.json.teamId }}"
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - created_team.status is defined
         - created_team.status == 200
 
@@ -150,7 +150,7 @@
       ansible.builtin.set_fact:
         grafana_team_id: "{{ (team_search.json.teams | first).id }}"
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - created_team.status is defined
         - created_team.status == 409
         - (team_search.json.teams | default([]) | length) > 0
@@ -160,7 +160,7 @@
         msg:
           - "Team utilisée pour company_name='{{ company_name }}'"
           - "team_id={{ grafana_team_id }}"
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
     # Création d'un utilisateur dédié à la team (non admin global)
@@ -179,7 +179,7 @@
         state: present
         validate_certs: false
       register: company_user
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Ajouter l'utilisateur à la team (membre de la team uniquement)
       community.grafana.grafana_team:
@@ -192,7 +192,7 @@
           - "{{ company_user_login }}"
         state: present
         validate_certs: false
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
     # Création du bucket, folder, datasource
@@ -208,13 +208,13 @@
       ansible.builtin.stat:
         path: "/srv/powerview/manage_influx_tokens.py"
       register: manage_tokens_script
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Fail if manage_influx_tokens.py is missing
       ansible.builtin.fail:
         msg: "Le script /srv/powerview/manage_influx_tokens.py est introuvable. Impossible de gérer le token InfluxDB dédié au bucket {{ company_name }}."
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - not manage_tokens_script.stat.exists
 
     - name: Create or get dedicated InfluxDB token for bucket
@@ -223,19 +223,19 @@
         --bucket {{ company_name }}
       register: bucket_token_cmd
       changed_when: false
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Set fact for bucket token
       ansible.builtin.set_fact:
         influxdb_bucket_token: "{{ bucket_token_cmd.stdout | trim }}"
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Debug bucket token (masqué)
       ansible.builtin.debug:
         msg: "Token dédié récupéré pour le bucket {{ company_name }} (longueur={{ influxdb_bucket_token | length }})"
         verbosity: 1
       no_log: true
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Create Grafana folder for team
       community.grafana.grafana_folder:
@@ -246,7 +246,7 @@
         state: present
         validate_certs: false
       register: created_folder
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
     # Datasource InfluxDB : ne pas la recréer si elle existe déjà
@@ -260,7 +260,7 @@
         status_code: [200, 404]
         validate_certs: false
       register: existing_ds
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Create InfluxDB datasource (créée comme influxdb, patchée ensuite en plugin custom)
       community.grafana.grafana_datasource:
@@ -294,7 +294,7 @@
         validate_certs: false
       register: created_datasource
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - existing_ds.status == 404
 
     - name: Set fact for datasource when it already exists
@@ -305,7 +305,7 @@
             id: "{{ existing_ds.json.id }}"
             clientId: "{{ existing_ds.json.jsonData.clientId | default(company_name ~ '_' ~ company_user_login, true) }}"
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - existing_ds.status == 200
 
     - name: Get created datasource by name
@@ -316,7 +316,7 @@
         status_code: 200
         validate_certs: false
       register: ds_get
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Patch datasource to use custom plugin type and forcer les Custom HTTP Headers
       ansible.builtin.uri:
@@ -369,7 +369,7 @@
           }}
         status_code: 200
         validate_certs: false
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
     # Dashboard de campagne via template Jinja (UN SEUL dashboard)
@@ -379,7 +379,7 @@
       ansible.builtin.stat:
         path: "{{ dashboard_template }}"
       register: dashboard_template_stat
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Fail if dashboard template is missing
       ansible.builtin.fail:
@@ -389,7 +389,7 @@
           Assure-toi que le fichier 'grafana-automation/templates/dashboard.json.j2'
           est bien présent sur le serveur.
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - not dashboard_template_stat.stat.exists
 
     - name: Render campaign dashboard JSON from template
@@ -404,7 +404,7 @@
         datasource_id: "{{ created_datasource.datasource.id }}"
         datasource_client_id: "{{ created_datasource.datasource.clientId }}"
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
         - dashboard_template_stat.stat.exists
 
     - name: Import campaign dashboard (idempotent via UID fixe)
@@ -419,7 +419,7 @@
         overwrite: true
         validate_certs: false
       register: imported_dashboard
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
     # Permissions via team (créée ou existante)
@@ -438,7 +438,7 @@
         status_code: 200
         validate_certs: false
       when:
-        - not dashboard_created.stat.exists
+        - not company_created.stat.exists
 
     - name: Set folder permissions for team
       ansible.builtin.uri:
@@ -452,34 +452,34 @@
               permission: 1
         status_code: 200
         validate_certs: false
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
-    # Nettoyage + marqueur .dashboard.created
+    # Nettoyage + marqueur .company.created
     # ------------------------------------------------------------------
 
     - name: Clean up temporary dashboard file
       ansible.builtin.file:
         path: "{{ campaign_dashboard_json }}"
         state: absent
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
-    - name: Ensure campaign directory exists
+    - name: Ensure company directory exists
       ansible.builtin.file:
-        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}"
+        path: "{{ data_path }}/{{ company_name }}"
         state: directory
         mode: "0755"
       become: true
       become_user: sftpgo
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
-    - name: Touch a file -> Dashboard created
+    - name: Touch a file -> Company created
       ansible.builtin.file:
-        path: "{{ data_path }}/{{ company_name }}/{{ campaign_name }}/.dashboard.created"
+        path: "{{ data_path }}/{{ company_name }}/.company.created"
         state: touch
       become: true
       become_user: sftpgo
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
 
     - name: Display user credentials
       ansible.builtin.debug:
@@ -492,4 +492,4 @@
           - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
           - "Folder: {{ company_name }}"
           - "User (team admin): login='{{ company_user_login }}', email='{{ company_user_email }}'"
-      when: not dashboard_created.stat.exists
+      when: not company_created.stat.exists
