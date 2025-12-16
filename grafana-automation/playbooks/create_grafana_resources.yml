@@ -17,12 +17,12 @@
 
     data_path: "/srv/sftpgo/data"
 
-    # Template Jinja pour le dashboard de campagne
+    # Template Jinja pour le dashboard de company
     dashboard_template: "{{ playbook_dir }}/../templates/dashboard.json.j2"
     campaign_dashboard_json: "/srv/powerview/dashboard_campaign.json"
 
-    # UID déterministe pour l'idempotence du dashboard de campagne
-    campaign_dashboard_uid: "powerview_{{ company_name }}_{{ campaign_name }}"
+    # UID déterministe pour l'idempotence du dashboard (un par company)
+    campaign_dashboard_uid: "powerview_{{ company_name }}"
 
     # Variables pour l'utilisateur "admin" de la team (surchageables via --extra-vars)
     company_user_login: "{{ company_user_login_override | default('user_' ~ company_name, true) }}"
@@ -36,18 +36,15 @@
       }}
 
   tasks:
-    - name: Validate required variables company_name and campaign_name
+    - name: Validate required variable company_name
       ansible.builtin.assert:
         that:
           - company_name is defined
-          - campaign_name is defined
           - company_name | length > 0
-          - campaign_name | length > 0
         fail_msg: >
-          Les variables 'company_name' et 'campaign_name' doivent être fournies,
-          par exemple :
+          La variable 'company_name' doit être fournie, par exemple :
           ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml
-          --extra-vars "company_name=company1 campaign_name=campaign1"
+          --extra-vars "company_name=company1"
 
     - name: Validate Grafana username/password are set
       ansible.builtin.assert:
@@ -280,8 +277,6 @@
           httpMode: "POST"
           httpHeaderName1: "Authorization"
           readOnly: true
-          campaignsFilter:
-            - "{{ campaign_name }}"
           channelsList: []
           triphasicList: []
           virtualSeries: []
@@ -303,7 +298,7 @@
           datasource:
             uid: "{{ existing_ds.json.uid }}"
             id: "{{ existing_ds.json.id }}"
-            clientId: "{{ existing_ds.json.jsonData.clientId | default(company_name ~ '_' ~ company_user_login, true) }}"
+            jsonData: "{{ existing_ds.json.jsonData | default({}) }}"
       when:
         - not company_created.stat.exists
         - existing_ds.status == 200
@@ -318,7 +313,17 @@
       register: ds_get
       when: not company_created.stat.exists
 
-    - name: Patch datasource to use custom plugin type and forcer les Custom HTTP Headers
+    - name: Compute datasource_client_id fact
+      ansible.builtin.set_fact:
+        datasource_client_id: >-
+          {{
+            (ds_get.json.jsonData.clientId
+             if (ds_get.json.jsonData is defined and 'clientId' in ds_get.json.jsonData)
+             else (company_name ~ '_' ~ company_user_login))
+          }}
+      when: not company_created.stat.exists
+
+    - name: Patch datasource to use custom plugin type et forcer les Custom HTTP Headers
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/datasources/{{ ds_get.json.id }}"
         method: PUT
@@ -343,12 +348,11 @@
                           'tlsSkipVerify': true,
                           'httpMode': 'POST',
                           'readOnly': true,
-                          'campaignsFilter': [campaign_name],
                           'channelsList': [],
                           'triphasicList': [],
                           'virtualSeries': [],
                           'seriesConfigApiUrl': '/api/datasources/proxy/25',
-                          'clientId': company_name ~ '_' ~ company_user_login
+                          'clientId': datasource_client_id
                         },
                         recursive=True
                       )
@@ -372,7 +376,7 @@
       when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
-    # Dashboard de campagne via template Jinja (UN SEUL dashboard)
+    # Dashboard via template Jinja (UN SEUL dashboard par company)
     # ------------------------------------------------------------------
 
     - name: Ensure dashboard template exists
@@ -392,22 +396,21 @@
         - not company_created.stat.exists
         - not dashboard_template_stat.stat.exists
 
-    - name: Render campaign dashboard JSON from template
+    - name: Render company dashboard JSON from template
       ansible.builtin.template:
         src: "{{ dashboard_template }}"
         dest: "{{ campaign_dashboard_json }}"
         mode: "0644"
       vars:
         company_name: "{{ company_name }}"
-        campaign_name: "{{ campaign_name }}"
         datasource_uid: "{{ created_datasource.datasource.uid }}"
         datasource_id: "{{ created_datasource.datasource.id }}"
-        datasource_client_id: "{{ created_datasource.datasource.clientId }}"
+        datasource_client_id: "{{ datasource_client_id }}"
       when:
         - not company_created.stat.exists
         - dashboard_template_stat.stat.exists
 
-    - name: Import campaign dashboard (idempotent via UID fixe)
+    - name: Import company dashboard (idempotent via UID fixe)
       community.grafana.grafana_dashboard:
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
@@ -489,7 +492,7 @@
           - "============================================"
           - "Team: {{ company_name }} (id={{ grafana_team_id }})"
           - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
-          - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
+          - "Dashboard (company): uid={{ campaign_dashboard_uid }}"
           - "Folder: {{ company_name }}"
-          - "User (team admin): login='{{ company_user_login }}', email='{{ company_user_email }}'"
+          - "User (team member): login='{{ company_user_login }}', email='{{ company_user_email }}'"
       when: not company_created.stat.exists
