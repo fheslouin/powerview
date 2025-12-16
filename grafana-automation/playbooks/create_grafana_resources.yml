@@ -302,6 +302,7 @@
         created_datasource:
           datasource:
             uid: "{{ existing_ds.json.uid }}"
+            id: "{{ existing_ds.json.id }}"
       when:
         - not dashboard_created.stat.exists
         - existing_ds.status == 200
@@ -399,6 +400,7 @@
         company_name: "{{ company_name }}"
         campaign_name: "{{ campaign_name }}"
         datasource_uid: "{{ created_datasource.datasource.uid }}"
+        datasource_id: "{{ created_datasource.datasource.id }}"
       when:
         - not dashboard_created.stat.exists
         - dashboard_template_stat.stat.exists
