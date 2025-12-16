@@ -106,6 +106,7 @@ cp .env.sample .env
 
 ```bash
 nano .env
+export $(grep -v '^#' .env | xargs)
 ```
 
 À minima :

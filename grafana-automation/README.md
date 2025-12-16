@@ -84,6 +84,47 @@ mais peuvent aussi être exécutés manuellement.
 > Le token dédié retourné par `manage_influx_tokens.py` est ensuite injecté
 > dans la datasource Grafana `influxdb_<company>`.
 
+## Custom HTTP Headers et plugin `influxdb-adecwatts-datasource`
+
+Les playbooks configurent les **Custom HTTP Headers** de la datasource comme suit :
+
+- `jsonData.httpHeaderName1 = "Authorization"`
+- `secureJsonData.httpHeaderValue1 = "Token <token_dédié_bucket>"`
+
+On le voit dans l’API Grafana :
+
+```json
+"jsonData": {
+  "httpHeaderName1": "Authorization",
+  ...
+},
+"secureJsonFields": {
+  "httpHeaderValue1": true,
+  "token": true
+}
+```
+
+Quelques points importants :
+
+- Grafana **ne renvoie jamais** la valeur réelle des champs `secureJsonData`
+  dans l’API, seulement des booléens dans `secureJsonFields`.
+- L’UI de la datasource ne montre la section “Custom HTTP Headers” que si le
+  plugin déclare ces champs dans son `plugin.json` et/ou réutilise le composant
+  standard de configuration de la datasource InfluxDB.
+- Avec le plugin custom `influxdb-adecwatts-datasource`, il est donc possible
+  que :
+  - les headers soient bien configurés et utilisés côté backend (ce que montre
+    l’API),
+  - mais qu’ils **n’apparaissent pas visuellement** dans l’onglet “Custom HTTP
+    Headers” de l’UI Grafana.
+
+En résumé :
+
+- **Les headers sont bien envoyés** par Grafana vers InfluxDB (via `jsonData` /
+  `secureJsonData`).
+- L’absence d’affichage dans l’UI est un détail de rendu du plugin, pas un
+  problème de configuration Ansible.
+
 ## Schéma de données attendu côté InfluxDB
 
 [...]  (contenu inchangé en dehors de cette section de prérequis)
