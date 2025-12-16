@@ -303,6 +303,7 @@
           datasource:
             uid: "{{ existing_ds.json.uid }}"
             id: "{{ existing_ds.json.id }}"
+            clientId: "{{ existing_ds.json.jsonData.clientId | default(company_name ~ '_' ~ company_user_login, true) }}"
       when:
         - not dashboard_created.stat.exists
         - existing_ds.status == 200
@@ -401,6 +402,7 @@
         campaign_name: "{{ campaign_name }}"
         datasource_uid: "{{ created_datasource.datasource.uid }}"
         datasource_id: "{{ created_datasource.datasource.id }}"
+        datasource_client_id: "{{ created_datasource.datasource.clientId }}"
       when:
         - not dashboard_created.stat.exists
         - dashboard_template_stat.stat.exists
