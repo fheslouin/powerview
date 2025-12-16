@@ -352,7 +352,7 @@ Le script `on-upload.sh` est appelé par SFTPGo avec différentes valeurs de
    - écrit les points dans InfluxDB ;
    - déplace le fichier (`parsed/` ou `error/`) ;
    - écrit un rapport JSON ;
-   - écrit un résumé dans le bucket meta.
+   - écrit un résumé d’exécution dans le bucket meta.
 
 ### 6.2 Cas `SFTPGO_ACTION=mkdir`
 
@@ -375,7 +375,7 @@ Le script `on-upload.sh` est appelé par SFTPGo avec différentes valeurs de
    - la team Grafana du client ;
    - le folder Grafana du client ;
    - la datasource InfluxDB dédiée (`influxdb_<company>`) ;
-   - le dashboard de la campagne.
+   - **un dashboard principal pour le client** (actuellement un seul dashboard par client, pas un par campagne).
 
 ---
 
@@ -411,7 +411,7 @@ pytest
   de rétention adaptées.  
 - Documenter pour chaque client :
   - le bucket InfluxDB ;
-  - les campagnes (dashboards Grafana) associées ;
+  - les campagnes (dossiers SFTP) associées ;
   - les appareils (`device_master_sn`) utilisés.
 
 ---

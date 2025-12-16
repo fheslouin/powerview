@@ -25,7 +25,7 @@ SFTPGo  --(hooks)-->  on-upload.sh
                           |
                           +-- SFTPGO_ACTION=mkdir  --> Ansible (create_grafana_resources.yml)
                                                           |
-                                                          +--> Team, folder, datasource, dashboards Grafana
+                                                          +--> Team, folder, datasource, dashboard principal Grafana
 ```
 
 Arborescence attendue pour les données :
@@ -130,7 +130,7 @@ Lorsqu’un client crée un dossier de campagne :
        --extra-vars "company_name=company1 campaign_name=campaign_test"
      ```
 
-3. Le playbook Ansible crée/maintient les ressources Grafana pour ce couple
+3. Le playbook Ansible crée/maintient les ressources Grafana pour ce client
    (voir section suivante).
 
 ---
@@ -140,7 +140,7 @@ Lorsqu’un client crée un dossier de campagne :
 Les playbooks Ansible se trouvent dans `grafana-automation/playbooks/` :
 
 - `create_grafana_resources.yml`  
-  - création/mise à jour des ressources Grafana pour un client + campagne.
+  - création/mise à jour des ressources Grafana pour un client.
 
 - `delete_grafana_resources.yml`  
   - suppression des ressources Grafana d’un client (dashboards, folder, datasource, team).
@@ -161,12 +161,12 @@ Pour chaque `company_name`, le playbook de création :
    - bucket par défaut : `<company_name>` ;
    - token InfluxDB dédié : `powerview_token_for_bucket_<company_name>`.
 
-4. Crée/maintient un ou plusieurs **dashboards** dans le folder `company_name` :
-   - un dashboard par campagne (`campaign_name`) ;
-   - basé sur un template Jinja (`templates/dashboard.json.j2`).
+4. Crée/maintient **un dashboard principal** dans le folder `company_name` :
+   - basé sur un template Jinja (`templates/dashboard.json.j2`) ;
+   - actuellement, un seul dashboard par client est géré par ce playbook (la variable `campaign_name` est disponible mais pas encore utilisée pour créer un dashboard distinct par campagne).
 
 5. Configure les **permissions** :
-   - la team `company_name` a un accès *viewer* au folder et aux dashboards.
+   - la team `company_name` a un accès *viewer* au folder et au dashboard.
 
 ### 4.2 Gestion des tokens InfluxDB
 
@@ -221,7 +221,7 @@ Instance Grafana unique
     |      |       |      - bucket: company1
     |      |       |      - token: powerview_token_for_bucket_company1
     |      |       |
-    |      |       +-- Dashboards: campaign1, campaign2, ...
+    |      |       +-- Dashboard principal (overview) pour company1
     |
     +-- Team company2
            |
@@ -232,7 +232,7 @@ Instance Grafana unique
                    |      - bucket: company2
                    |      - token: powerview_token_for_bucket_company2
                    |
-                   +-- Dashboards: campaignA, campaignB, ...
+                   +-- Dashboard principal (overview) pour company2
 ```
 
 Avantages :
@@ -277,7 +277,7 @@ ansible-playbook grafana-automation/playbooks/delete_grafana_resources.yml \
   - la team Grafana ;
   - le folder Grafana ;
   - la datasource InfluxDB ;
-  - les campagnes (dashboards) existantes.  
+  - le dashboard principal existant (et, plus tard, les éventuels dashboards par campagne si cette fonctionnalité est ajoutée).  
 - Limiter l’accès à `INFLUXDB_ADMIN_TOKEN` aux seuls scripts internes
   (`tsv_parser.py`, `manage_influx_tokens.py`, Ansible).  
 - Utiliser des **tokens dédiés par bucket** pour toutes les intégrations externes

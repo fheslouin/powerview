@@ -29,7 +29,7 @@ PowerView s’appuie sur les briques suivantes :
   - Une seule instance partagée entre tous les clients (multi‑tenant).
 
 - **Ansible + scripts Python**  
-  - Création automatique des ressources Grafana (team, folder, datasource, dashboards).  
+  - Création automatique des ressources Grafana (team, folder, datasource, dashboard principal du client).  
   - Gestion des tokens InfluxDB dédiés par bucket (`manage_influx_tokens.py`).
 
 - **Caddy**  
@@ -440,7 +440,7 @@ Après succès :
    - team `company1` ;
    - folder `company1` ;
    - datasource `influxdb_company1` (plugin `influxdb-adecwatts-datasource`) ;
-   - dashboard `campaign_test` dans le folder `company1`.
+   - **un dashboard principal pour le client** (actuellement un seul dashboard par client, pas un par campagne).
 
 2. Upload d’un fichier TSV (upload) :
 
