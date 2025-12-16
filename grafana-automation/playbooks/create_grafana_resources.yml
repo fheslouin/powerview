@@ -25,9 +25,9 @@
     campaign_dashboard_uid: "powerview_{{ company_name }}_{{ campaign_name }}"
 
     # Variables pour l'utilisateur "admin" de la team (surchageables via --extra-vars)
-    company_admin_login: "{{ company_admin_login_override | default('admin_' ~ company_name, true) }}"
-    company_admin_email: "{{ company_admin_email_override | default('admin_' ~ company_name ~ '@example.com', true) }}"
-    company_admin_password: "{{ company_admin_password_override | default('ChangeMe123!', true) }}"
+    company_user_login: "{{ company_user_login_override | default('user_' ~ company_name, true) }}"
+    company_user_email: "{{ company_user_email_override | default('user_' ~ company_name ~ '@example.com', true) }}"
+    company_user_password: "{{ company_user_password_override | default('ChangeMe123!', true) }}"
 
     # Headers d'auth pour les appels REST (URI) : on force le token Admin
     grafana_auth_headers: >-
@@ -172,9 +172,9 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "{{ company_name }} Admin"
-        login: "{{ company_admin_login }}"
-        email: "{{ company_admin_email }}"
-        password: "{{ company_admin_password }}"
+        login: "{{ company_user_login }}"
+        email: "{{ company_user_email }}"
+        password: "{{ company_user_password }}"
         is_admin: false
         state: present
         validate_certs: false
@@ -187,9 +187,9 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "{{ company_name }}"
-        email: "{{ company_admin_email }}"
+        email: "{{ company_user_email }}"
         members:
-          - "{{ company_admin_login }}"
+          - "{{ company_user_login }}"
         state: present
         validate_certs: false
       when: not dashboard_created.stat.exists
@@ -285,6 +285,8 @@
           channelsList: []
           triphasicList: []
           virtualSeries: []
+          seriesConfigApiUrl: "/api/datasources/proxy/25"
+          clientId: "{{ company_name }}_{{ company_user_login }}"
         additional_secure_json_data:
           httpHeaderValue1: "Token {{ influxdb_bucket_token }}"
           token: "{{ influxdb_bucket_token }}"
@@ -449,5 +451,5 @@
           - "Datasource: influxdb_{{ company_name }} (type=plugin influxdb-adecwatts-datasource, token dédié au bucket '{{ company_name }}' via manage_influx_tokens.py)"
           - "Dashboard: {{ campaign_name }} (uid={{ campaign_dashboard_uid }})"
           - "Folder: {{ company_name }}"
-          - "User (team admin): login='{{ company_admin_login }}', email='{{ company_admin_email }}'"
+          - "User (team admin): login='{{ company_user_login }}', email='{{ company_user_email }}'"
       when: not dashboard_created.stat.exists
