@@ -316,7 +316,7 @@
       register: ds_get
       when: not dashboard_created.stat.exists
 
-    - name: Patch datasource to use custom plugin type
+    - name: Patch datasource to use custom plugin type and forcer les Custom HTTP Headers
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/datasources/{{ ds_get.json.id }}"
         method: PUT
@@ -327,7 +327,43 @@
         body: >-
           {{
             ds_get.json
-            | combine({'type': 'influxdb-adecwatts-datasource'}, recursive=True)
+            | combine(
+                {
+                  'type': 'influxdb-adecwatts-datasource',
+                  'jsonData': (
+                    (ds_get.json.jsonData | default({}))
+                    | combine(
+                        {
+                          'httpHeaderName1': 'Authorization',
+                          'version': 'Flux',
+                          'organization': influxdb_org,
+                          'defaultBucket': company_name,
+                          'tlsSkipVerify': true,
+                          'httpMode': 'POST',
+                          'readOnly': true,
+                          'campaignsFilter': [campaign_name],
+                          'channelsList': [],
+                          'triphasicList': [],
+                          'virtualSeries': [],
+                          'seriesConfigApiUrl': '/api/datasources/proxy/25',
+                          'clientId': company_name ~ '_' ~ company_user_login
+                        },
+                        recursive=True
+                      )
+                  ),
+                  'secureJsonData': (
+                    (ds_get.json.secureJsonData | default({}))
+                    | combine(
+                        {
+                          'httpHeaderValue1': 'Token ' ~ influxdb_bucket_token,
+                          'token': influxdb_bucket_token
+                        },
+                        recursive=True
+                      )
+                  )
+                },
+                recursive=True
+              )
           }}
         status_code: 200
         validate_certs: false
