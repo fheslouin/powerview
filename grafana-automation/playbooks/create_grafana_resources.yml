@@ -171,7 +171,7 @@
         url: "{{ grafana_url }}"
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
-        name: "{{ company_name }} Admin"
+        name: "{{ company_name }} Default"
         login: "{{ company_user_login }}"
         email: "{{ company_user_email }}"
         password: "{{ company_user_password }}"

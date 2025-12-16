@@ -26,6 +26,32 @@
         "uid": "{{ datasource_uid }}"
       },
       "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "options": {},
+      "pluginVersion": "0.0.1",
+      "targets": [
+        {
+          "refId": "A"
+        }
+      ],
+      "title": "New panel",
+      "type": "adecwatts-series-config-panel"
+    },
+    {
+      "datasource": {
+        "type": "influxdb-adecwatts-datasource",
+        "uid": "{{ datasource_uid }}"
+      },
+      "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
