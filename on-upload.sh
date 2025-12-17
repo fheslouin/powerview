@@ -109,11 +109,8 @@ setup_environment() {
 handle_upload() {
     local file_path="${SFTPGO_ACTION_PATH:-}"
 
-    if [[ -z "${file_path}" ]]; then
-        log_error "SFTPGO_ACTION_PATH environment variable not set for upload"
-    fi
-
-    log "Upload complete action triggered by: ${file_path}"
+    # On loggue quand même pour voir ce que SFTPGo nous passe
+    log "Upload complete action triggered. SFTPGO_ACTION_PATH='${file_path:-<unset>}'"
 
     setup_environment
 
@@ -121,17 +118,26 @@ handle_upload() {
         log_error "TSV parser not found: ${TSV_PARSER}"
     fi
 
-    # Traitement fichier par fichier : on passe à tsv_parser.py
-    # - le dossier racine des données (DATA_DIR)
-    # - le chemin complet du fichier uploadé
-    if ! python3 "${TSV_PARSER}" \
-        --dataFolder "${DATA_DIR}" \
-        --tsvFile "${file_path}" \
-        2>&1 | tee -a "${LOG_FILE}"; then
-        log_error "TSV parser failed for file: ${file_path}"
+    # Si SFTPGO_ACTION_PATH est vide (cas actuel), on traite TOUTES les TSV du DATA_DIR.
+    # Sinon, on pourrait à terme traiter uniquement ce fichier.
+    if [[ -z "${file_path}" ]]; then
+        log "No SFTPGO_ACTION_PATH provided, running parser on all TSV files in ${DATA_DIR}"
+        if ! python3 "${TSV_PARSER}" \
+            --dataFolder "${DATA_DIR}" \
+            2>&1 | tee -a "${LOG_FILE}"; then
+            log_error "TSV parser failed for dataFolder: ${DATA_DIR}"
+        fi
+    else
+        log "Running parser for single file: ${file_path}"
+        if ! python3 "${TSV_PARSER}" \
+            --dataFolder "${DATA_DIR}" \
+            --tsvFile "${file_path}" \
+            2>&1 | tee -a "${LOG_FILE}"; then
+            log_error "TSV parser failed for file: ${file_path}"
+        fi
     fi
 
-    log "Upload processing completed for: ${file_path}"
+    log "Upload processing completed (dataFolder=${DATA_DIR}, file='${file_path:-ALL}')"
 }
 
 handle_mkdir() {
