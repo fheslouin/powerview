@@ -4,9 +4,8 @@ Gestion des tokens InfluxDB par bucket (un token par client), via la CLI `influx
 
 Ce script :
 - lit la configuration InfluxDB depuis les variables d'environnement :
-  INFLUXDB_ORG
-- suppose que la CLI `influx` est installée et déjà configurée avec un token root
-  (via `influx config create --active ...`).
+  INFLUXDB_ORG, INFLUXDB_HOST, INFLUXDB_ADMIN_TOKEN
+- suppose que la CLI `influx` est installée.
 - prend en argument : --bucket <nom_du_bucket>
 - vérifie si un token existe déjà pour ce bucket (via la description)
 - sinon crée un token avec droits read/write sur ce bucket
@@ -18,12 +17,12 @@ Usage (manuel) :
     python3 manage_influx_tokens.py --bucket company1
 
 Prérequis côté CLI Influx :
-    influx config create \
-      --config-name powerview-root \
-      --host http://localhost:8086 \
-      --org powerview \
-      --token 'TON_TOKEN_ROOT' \
-      --active
+    Soit:
+      - un profil CLI déjà configuré avec un token root (via `influx config create --active ...`)
+    Soit:
+      - les variables d'env INFLUXDB_HOST et INFLUXDB_ADMIN_TOKEN définies,
+        le script se charge alors de positionner INFLUX_HOST et INFLUX_TOKEN
+        pour la CLI `influx`.
 """
 
 import argparse
@@ -62,6 +61,30 @@ def _ensure_influx_cli_available() -> None:
         )
 
 
+def _prepare_influx_env() -> None:
+    """
+    Prépare l'environnement pour la CLI `influx` en positionnant
+    explicitement INFLUX_HOST et INFLUX_TOKEN si possible.
+
+    - INFLUX_HOST est dérivé de INFLUXDB_HOST (si présent)
+    - INFLUX_TOKEN est dérivé de INFLUXDB_ADMIN_TOKEN (si présent)
+
+    Cela permet à la CLI de fonctionner même si aucun profil actif
+    n'est configuré, ou si le profil actif n'est pas celui attendu
+    dans le contexte Ansible.
+    """
+    influxdb_host = os.getenv("INFLUXDB_HOST")
+    influxdb_admin_token = os.getenv("INFLUXDB_ADMIN_TOKEN")
+
+    # On ne force que si les variables sont présentes, pour ne pas casser
+    # un éventuel profil CLI déjà correctement configuré.
+    if influxdb_host and not os.getenv("INFLUX_HOST"):
+        os.environ["INFLUX_HOST"] = influxdb_host
+
+    if influxdb_admin_token and not os.getenv("INFLUX_TOKEN"):
+        os.environ["INFLUX_TOKEN"] = influxdb_admin_token
+
+
 def _run_influx_cmd(args: List[str]) -> Union[Dict[str, Any], List[Any]]:
     """
     Exécute `influx ... --json` et retourne le JSON parsé.
@@ -74,6 +97,7 @@ def _run_influx_cmd(args: List[str]) -> Union[Dict[str, Any], List[Any]]:
     doivent gérer les deux cas.
     """
     _ensure_influx_cli_available()
+    _prepare_influx_env()
 
     cmd = ["influx"] + args + ["--json"]
     try:
@@ -157,7 +181,7 @@ def find_bucket_id_cli(bucket_name: str, org: str) -> str:
     except RuntimeError as e:
         # Si la CLI renvoie explicitement un 404 "bucket not found", on crée le bucket
         msg = str(e)
-        if "failed to find bucket by name" in msg or "bucket \"{}\" not found".format(bucket_name) in msg:
+        if "failed to find bucket by name" in msg or f"bucket \"{bucket_name}\" not found" in msg:
             # Création du bucket puis nouvelle tentative de find
             bucket_id = create_bucket_cli(bucket_name, org)
             return bucket_id
@@ -291,17 +315,20 @@ def main() -> None:
         # 1) Vérifie que la CLI influx est dispo
         _ensure_influx_cli_available()
 
-        # 2) Trouver (ou créer) l'ID du bucket via la CLI
+        # 2) Prépare l'environnement pour la CLI (INFLUX_HOST / INFLUX_TOKEN)
+        _prepare_influx_env()
+
+        # 3) Trouver (ou créer) l'ID du bucket via la CLI
         bucket_id = find_bucket_id_cli(bucket_name, org)
 
-        # 3) Voir si un token existe déjà pour ce bucket
+        # 4) Voir si un token existe déjà pour ce bucket
         existing = find_existing_token_for_bucket_cli(bucket_name, org)
         if existing:
             # IMPORTANT : on n'affiche QUE le token, sans texte autour
             print(existing)
             return
 
-        # 4) Sinon, créer un nouveau token
+        # 5) Sinon, créer un nouveau token
         token = create_token_for_bucket_cli(bucket_id, bucket_name, org)
         # IMPORTANT : on n'affiche QUE le token, sans texte autour
         print(token)

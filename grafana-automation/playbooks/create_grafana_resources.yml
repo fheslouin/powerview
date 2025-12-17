@@ -214,6 +214,14 @@
         - not company_created.stat.exists
         - not manage_tokens_script.stat.exists
 
+    - name: Debug Influx env before managing bucket token
+      ansible.builtin.debug:
+        msg:
+          - "INFLUXDB_HOST={{ influxdb_host }}"
+          - "INFLUXDB_ORG={{ influxdb_org }}"
+          - "INFLUXDB_ADMIN_TOKEN défini: {{ (influxdb_admin_token is defined) and (influxdb_admin_token | length > 0) }}"
+      when: not company_created.stat.exists
+
     - name: Create or get dedicated InfluxDB token for bucket
       ansible.builtin.command: >
         python3 /srv/powerview/manage_influx_tokens.py
