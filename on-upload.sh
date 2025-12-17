@@ -118,22 +118,29 @@ handle_upload() {
         log_error "TSV parser not found: ${TSV_PARSER}"
     fi
 
-    # Si SFTPGO_ACTION_PATH est vide (cas actuel), on traite TOUTES les TSV du DATA_DIR.
-    # Sinon, on pourrait à terme traiter uniquement ce fichier.
+    # Si SFTPGO_ACTION_PATH est vide (cas actuel), on traite TOUTES les TSV du DATA_DIR,
+    # mais en ignorant les fichiers dont le nom commence par 'PARSED_'.
     if [[ -z "${file_path}" ]]; then
-        log "No SFTPGO_ACTION_PATH provided, running parser on all TSV files in ${DATA_DIR}"
+        log "No SFTPGO_ACTION_PATH provided, running parser on all TSV files in ${DATA_DIR} (en ignorant les fichiers PARSED_*)"
         if ! python3 "${TSV_PARSER}" \
             --dataFolder "${DATA_DIR}" \
             2>&1 | tee -a "${LOG_FILE}"; then
             log_error "TSV parser failed for dataFolder: ${DATA_DIR}"
         fi
     else
-        log "Running parser for single file: ${file_path}"
-        if ! python3 "${TSV_PARSER}" \
-            --dataFolder "${DATA_DIR}" \
-            --tsvFile "${file_path}" \
-            2>&1 | tee -a "${LOG_FILE}"; then
-            log_error "TSV parser failed for file: ${file_path}"
+        # Si un chemin est fourni, on ignore explicitement les fichiers déjà marqués PARSED_
+        local basename
+        basename="$(basename "${file_path}")"
+        if [[ "${basename}" == PARSED_* ]]; then
+            log "Skipping upload processing for already parsed file: ${file_path}"
+        else
+            log "Running parser for single file: ${file_path}"
+            if ! python3 "${TSV_PARSER}" \
+                --dataFolder "${DATA_DIR}" \
+                --tsvFile "${file_path}" \
+                2>&1 | tee -a "${LOG_FILE}"; then
+                log_error "TSV parser failed for file: ${file_path}"
+            fi
         fi
     fi
 
