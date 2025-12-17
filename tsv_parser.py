@@ -163,11 +163,12 @@ def process_tsv_file(
         parser = TSVParserFactory.get_parser(file_format)
 
         # Parse complet (header + data) avec les bons tags
+        # Schéma unifié : measurement = "electrical"
         points, stats = parser.parse(
             tsv_file,
             campaign=campaign_name,
             bucket_name=bucket_name,
-            table_name=campaign_name,  # measurement = nom de campagne
+            table_name="electrical",
         )
 
         logger.info("  Points created: %d", len(points))
@@ -404,7 +405,7 @@ def main():
                     tsv_file,
                     campaign=campaign_name,
                     bucket_name=bucket_name,
-                    table_name=campaign_name,
+                    table_name="electrical",
                 )
 
                 file_report["nb_rows"] = stats.get("nb_rows", 0)
@@ -433,7 +434,12 @@ def main():
                 successful += 1
                 run_report["nb_points_total"] += file_report.get("nb_points", 0)
                 # Fichier traité avec succès -> on le déplace dans parsed/
-                move_parsed_file(tsv_file)
+                try:
+                    move_parsed_file(tsv_file)
+                except Exception as e:
+                    logger.warning(
+                        "Impossible de déplacer le fichier traité vers 'parsed/': %s", e
+                    )
             else:
                 failed += 1
                 # Erreur de traitement -> on le déplace dans error/

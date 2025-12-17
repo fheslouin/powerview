@@ -112,8 +112,10 @@ class BaseTSVParser:
                     nb_invalid_values += 1
                     continue
 
+                # Measurement unifié "electrical"
                 point = Point("electrical")
-                point = point.field(f"{mapping["channel_id"]}_{mapping["unit"]}", value)
+                # Field = "<channel_id>_<unit>"
+                point = point.field(f"{mapping['channel_id']}_{mapping['unit']}", value)
                 point = point.time(int(timestamp.timestamp()), WritePrecision.S)
                 point = point.tag("campaign", campaign)                            # campagne de mesure
                 point = point.tag("channel_id", mapping["channel_id"])             # M02001171_Ch1_M020011201

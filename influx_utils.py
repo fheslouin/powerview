@@ -142,13 +142,16 @@ def count_points_for_file(
 
     start_time / end_time doivent être des timestamps ISO 8601 (UTC de préférence).
     On suppose que les points ont un tag 'file_name' avec le nom du fichier TSV.
+
+    Schéma unifié : measurement unique 'electrical'.
     """
     query_api = client.query_api()
 
     flux = f"""
 from(bucket: "{bucket}")
   |> range(start: 0)
-  |> filter(fn: (r) => r._measurement == "{campaign}")
+  |> filter(fn: (r) => r._measurement == "electrical")
+  |> filter(fn: (r) => r.campaign == "{campaign}")
   |> filter(fn: (r) => r.device_master_sn == "{device_master_sn}")
   |> filter(fn: (r) => r.file_name == "{file_name}")
   |> count()
