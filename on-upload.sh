@@ -27,6 +27,9 @@ readonly COMPANY_INDEX=5
 readonly CAMPAIGN_INDEX=6
 readonly DEVICE_INDEX=7
 
+# S'assure que le dossier de logs existe
+mkdir -p "$(dirname "${LOG_FILE}")"
+
 # Redirige stdout/stderr vers le fichier de log
 exec 3>&1 1>>"${LOG_FILE}" 2>&1
 
@@ -164,13 +167,24 @@ handle_mkdir() {
 # ============================================
 
 main() {
+    # Log de debug au tout début pour voir ce que SFTPGo nous passe
+    log "=== on-upload.sh invoked ==="
+    log "  PID=$$ USER=$(whoami)"
+    log "  SFTPGO_ACTION='${SFTPGO_ACTION:-<unset>}'"
+    log "  SFTPGO_ACTION_PATH='${SFTPGO_ACTION_PATH:-<unset>}'"
+
     # Validate required environment variables
     if [[ -z "${SFTPGO_ACTION:-}" ]]; then
+        log "Environment dump (partial) because SFTPGO_ACTION is unset:"
+        # On loggue quelques variables utiles, pas tout l'env pour éviter le bruit
+        log "  PATH='${PATH}'"
+        log "  PWD='${PWD}'"
         log_error "SFTPGO_ACTION environment variable not set"
     fi
 
     case "${SFTPGO_ACTION}" in
         "upload")
+            log "Handling action 'upload'"
             handle_upload
             ;;
 
@@ -180,6 +194,7 @@ main() {
             fi
 
             local file_path="${SFTPGO_ACTION_PATH}"
+            log "Handling action 'mkdir' for path '${file_path}'"
             handle_mkdir "${file_path}"
             ;;
 
