@@ -158,7 +158,7 @@ Traitement réel d’un fichier TSV :
 ```bash
 python3 tsv_parser.py \
   --dataFolder /srv/sftpgo/data \
-  --tsvFile /srv/sftpgo/data/company1/campaign1/02001084/T302_251012_031720.tsv
+  --tsvFile /srv/sftpgo/data/company3/campaign/02001084/T302_251012_031720.tsv
 ```
 
 Après succès :
