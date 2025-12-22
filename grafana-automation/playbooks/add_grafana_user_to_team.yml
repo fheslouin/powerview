@@ -88,32 +88,22 @@
           - "team_id={{ grafana_team_id }}"
 
     # ------------------------------------------------------------------
-    # Créer l'utilisateur via /api/admin/users (idempotent via 200/409)
+    # Créer / assurer l'existence de l'utilisateur via module grafana_user
     # ------------------------------------------------------------------
 
-    - name: Create Grafana user (200 = créé, 409 = existe déjà)
-      ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/admin/users"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ grafana_api_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          name: "{{ team_name }} User"
-          login: "{{ user_login }}"
-          email: "{{ user_email }}"
-          password: "{{ user_password }}"
-        status_code: [200, 409]
+    - name: Ensure Grafana user exists (création/mise à jour)
+      community.grafana.grafana_user:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ team_name }} User"
+        login: "{{ user_login }}"
+        email: "{{ user_email }}"
+        password: "{{ user_password }}"
+        is_admin: false
+        state: present
         validate_certs: false
-      register: create_user_resp
-
-    - name: Debug user creation response
-      ansible.builtin.debug:
-        msg:
-          - "Résultat création utilisateur Grafana pour login='{{ user_login }}'"
-          - "status={{ create_user_resp.status }}"
-          - "body={{ create_user_resp.json | default({}) }}"
+      register: created_user
 
     # ------------------------------------------------------------------
     # Ajouter l'utilisateur à la team
