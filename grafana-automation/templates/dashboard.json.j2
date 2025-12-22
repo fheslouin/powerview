@@ -20,6 +20,19 @@
   "graphTooltip": 0,
   "links": [],
   "panels": [
+       {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 3,
+      "panels": [],
+      "title": "Settings",
+      "type": "row"
+    },
     {
       "datasource": {
         "type": "influxdb-adecwatts-datasource",
@@ -33,7 +46,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 2,
       "pluginVersion": "0.0.1",
@@ -115,7 +128,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 10
       },
       "id": 1,
       "options": {
@@ -138,11 +151,11 @@
             "type": "influxdb-adecwatts-datasource",
             "uid": "{{ datasource_uid }}"
           },
-          "query": "from(bucket:\"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
+          "query": "from(bucket:\"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.campaign == \"v.campaign\")\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
           "refId": "A"
         }
       ],
-      "title": "Visualisation {{ company_name }}",
+      "title": "Visualisation",
       "type": "timeseries"
     }
   ],
@@ -150,7 +163,25 @@
   "schemaVersion": 42,
   "tags": [],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "influxdb-adecwatts-datasource",
+          "uid": "{{ datasource_uid }}"
+        },
+        "definition": "from( bucket:\"{{ company_name }}\")\n|>  range(start: 0)\n|> filter(fn: (r) => r._measurement == \"electrical\")\n|> keep(columns: [\"campaign\"])\n|> group()\n|> distinct(column: \"campaign\")\n|> sort(columns: [\"campaign\"])",
+        "label": "Campagne",
+        "name": "campaign",
+        "options": [],
+        "query": {
+          "query": "from( bucket:\"{{ company_name }}\")\n|>  range(start: 0)\n|> filter(fn: (r) => r._measurement == \"electrical\")\n|> keep(columns: [\"campaign\"])\n|> group()\n|> distinct(column: \"campaign\")\n|> sort(columns: [\"campaign\"])"
+        },
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-7d",
