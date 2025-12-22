@@ -20,50 +20,7 @@
   "graphTooltip": 0,
   "links": [],
   "panels": [
-       {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 3,
-      "panels": [],
-      "title": "Settings",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "influxdb-adecwatts-datasource",
-        "uid": "{{ datasource_uid }}"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 1
-      },
-      "id": 2,
-      "pluginVersion": "0.0.1",
-      "targets": [
         {
-          "refId": "A"
-        }
-      ],
-      "title": "Configuration des voies",
-      "type": "adecwatts-series-config-panel",
-      "options": {
-        "forcedClientId": "{{ datasource_client_id }}",
-        "forcedDatasourceId": {{ datasource_id }},
-        "forcedBucket": "{{ company_name }}"
-      }
-    },
-    {
       "datasource": {
         "type": "influxdb-adecwatts-datasource",
         "uid": "{{ datasource_uid }}"
@@ -128,7 +85,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 0
       },
       "id": 1,
       "options": {
@@ -151,12 +108,55 @@
             "type": "influxdb-adecwatts-datasource",
             "uid": "{{ datasource_uid }}"
           },
-          "query": "from(bucket:\"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.campaign == \"v.campaign\")\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
+          "query": "from(bucket:\"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.campaign == \"${campaign}\")\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
           "refId": "A"
         }
       ],
       "title": "Visualisation",
       "type": "timeseries"
+    },
+       {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "id": 3,
+      "panels": [],
+      "title": "Settings",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb-adecwatts-datasource",
+        "uid": "{{ datasource_uid }}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 2,
+      "pluginVersion": "0.0.1",
+      "targets": [
+        {
+          "refId": "A"
+        }
+      ],
+      "title": "Configuration des voies",
+      "type": "adecwatts-series-config-panel",
+      "options": {
+        "forcedClientId": "{{ datasource_client_id }}",
+        "forcedDatasourceId": {{ datasource_id }},
+        "forcedBucket": "{{ company_name }}"
+      }
     }
   ],
   "preload": false,
