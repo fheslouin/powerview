@@ -88,30 +88,10 @@
           - "team_id={{ grafana_team_id }}"
 
     # ------------------------------------------------------------------
-    # Créer / assurer l'existence de l'utilisateur via API REST
+    # Créer l'utilisateur via /api/admin/users (idempotent via 200/409)
     # ------------------------------------------------------------------
 
-    - name: Lookup existing Grafana user by login
-      ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
-        method: GET
-        headers: "{{ grafana_auth_headers }}"
-        status_code: [200, 404]
-        validate_certs: false
-      register: user_lookup
-
-    - name: Set fact user_exists
-      ansible.builtin.set_fact:
-        user_exists: "{{ user_lookup.status == 200 }}"
-
-    - name: Debug user lookup
-      ansible.builtin.debug:
-        msg:
-          - "User lookup pour login='{{ user_login }}'"
-          - "status={{ user_lookup.status }}"
-          - "user_exists={{ user_exists }}"
-
-    - name: Create Grafana user if not exists (via /api/admin/users)
+    - name: Create Grafana user (200 = créé, 409 = existe déjà)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/admin/users"
         method: POST
@@ -124,37 +104,16 @@
           login: "{{ user_login }}"
           email: "{{ user_email }}"
           password: "{{ user_password }}"
-        status_code: 200
+        status_code: [200, 409]
         validate_certs: false
-      register: created_user_resp
-      when: not user_exists
+      register: create_user_resp
 
-    - name: Set grafana_user_id when user was just created
-      ansible.builtin.set_fact:
-        grafana_user_id: "{{ created_user_resp.json.id }}"
-      when: not user_exists
-
-    - name: Set grafana_user_id when user already exists
-      ansible.builtin.set_fact:
-        grafana_user_id: "{{ user_lookup.json.id }}"
-      when: user_exists
-
-    # Optionnel : mise à jour de l'email si l'utilisateur existe déjà
-    - name: Update existing Grafana user email if different
-      ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/users/{{ grafana_user_id }}"
-        method: PUT
-        headers:
-          Authorization: "Bearer {{ grafana_api_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          email: "{{ user_email }}"
-        status_code: 200
-        validate_certs: false
-      when:
-        - user_exists
-        - (user_lookup.json.email | default('')) != user_email
+    - name: Debug user creation response
+      ansible.builtin.debug:
+        msg:
+          - "Résultat création utilisateur Grafana pour login='{{ user_login }}'"
+          - "status={{ create_user_resp.status }}"
+          - "body={{ create_user_resp.json | default({}) }}"
 
     # ------------------------------------------------------------------
     # Ajouter l'utilisateur à la team
@@ -181,4 +140,3 @@
           - "Team: {{ team_name }} (id={{ grafana_team_id }})"
           - "User login: {{ user_login }}"
           - "User email: {{ user_email }}"
-          - "User id: {{ grafana_user_id }}"
