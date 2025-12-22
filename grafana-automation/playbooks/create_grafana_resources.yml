@@ -25,8 +25,8 @@
     campaign_dashboard_uid: "powerview_{{ company_name }}"
 
     # Variables pour l'utilisateur "admin" de la team (surchageables via --extra-vars)
-    company_user_login: "{{ company_user_login_override | default('user_' ~ company_name, true) }}"
-    company_user_email: "{{ company_user_email_override | default('user_' ~ company_name ~ '@example.com', true) }}"
+    company_user_login: "{{ company_user_login_override | default(company_name, true) }}"
+    company_user_email: "{{ company_user_email_override | default(company_name ~ '@example.com', true) }}"
     company_user_password: "{{ company_user_password_override | default('ChangeMe123!', true) }}"
 
     # Headers d'auth pour les appels REST (URI) : on force le token Admin

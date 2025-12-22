@@ -120,6 +120,20 @@ Optionnel :
 >   (`powerview_token_for_bucket_<company>`), qui est ensuite injecté dans la
 >   datasource `influxdb_<company>`.
 
+> ⚠️ **Rappel important pour Ansible**
+>
+> Avant **toute** commande `ansible-playbook`, il faut :
+>
+> ```bash
+> cd /srv/powerview
+> source envs/powerview/bin/activate
+> export $(grep -v '^#' .env | xargs)
+> ```
+>
+> Sans cette séquence, les variables `GRAFANA_*` et `INFLUXDB_*` ne seront pas
+> présentes dans l’environnement, et les playbooks échoueront (erreurs sur
+> `GRAFANA_URL`, `GRAFANA_USERNAME`, `INFLUXDB_HOST`, etc.).
+
 Démarrer InfluxDB et Grafana (via Podman) :
 
 ```bash

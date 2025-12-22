@@ -1,0 +1,132 @@
+---
+- name: Add a Grafana user to an existing team
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    grafana_url: "{{ lookup('ansible.builtin.env', 'GRAFANA_URL') }}"
+    grafana_username: "{{ lookup('ansible.builtin.env', 'GRAFANA_USERNAME') }}"
+    grafana_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_PASSWORD') }}"
+    grafana_api_token: "{{ lookup('ansible.builtin.env', 'GRAFANA_API_TOKEN') | default('', true) }}"
+
+    # Nom de la team Grafana existante (ex: company1), à passer via --extra-vars
+    # team_name: "company1"
+
+    # user_login / user_email / user_password peuvent être surchargés via --extra-vars
+    user_login: "{{ user_login_override | default('user_' ~ team_name, true) }}"
+    user_email: "{{ user_email_override | default(team_name ~ '@example.com', true) }}"
+    user_password: "{{ user_password_override | default('ChangeMe123!', true) }}"
+
+    grafana_auth_headers: >-
+      {{
+        {'Authorization': 'Bearer ' ~ grafana_api_token}
+      }}
+
+  tasks:
+    - name: Validate required variable team_name
+      ansible.builtin.assert:
+        that:
+          - team_name is defined
+          - team_name | length > 0
+        fail_msg: >
+          La variable 'team_name' doit être fournie, par exemple :
+          ansible-playbook grafana-automation/playbooks/add_grafana_user_to_team.yml
+          --extra-vars "team_name=company1"
+
+    - name: Validate Grafana credentials
+      ansible.builtin.assert:
+        that:
+          - grafana_username is defined
+          - grafana_password is defined
+          - grafana_username | length > 0
+          - grafana_password | length > 0
+          - grafana_api_token is defined
+          - grafana_api_token | length > 0
+        fail_msg: >
+          GRAFANA_USERNAME, GRAFANA_PASSWORD et GRAFANA_API_TOKEN doivent être définis
+          dans l'environnement (.env) et correspondre à un compte / token Admin.
+
+    - name: Check Grafana health
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/health"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: grafana_health
+      failed_when: grafana_health.status != 200
+
+    # ------------------------------------------------------------------
+    # Récupérer la team existante
+    # ------------------------------------------------------------------
+
+    - name: Search existing team by name
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams/search?name={{ team_name }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: team_search
+
+    - name: Fail if team not found
+      ansible.builtin.fail:
+        msg: >
+          La team Grafana '{{ team_name }}' est introuvable via /api/teams/search.
+          Vérifie le nom dans Grafana.
+      when: (team_search.json.teams | default([]) | length) == 0
+
+    - name: Set grafana_team_id fact
+      ansible.builtin.set_fact:
+        grafana_team_id: "{{ (team_search.json.teams | first).id }}"
+
+    - name: Debug team id
+      ansible.builtin.debug:
+        msg:
+          - "Team trouvée pour team_name='{{ team_name }}'"
+          - "team_id={{ grafana_team_id }}"
+
+    # ------------------------------------------------------------------
+    # Créer / assurer l'existence de l'utilisateur
+    # ------------------------------------------------------------------
+
+    - name: Ensure Grafana user exists
+      community.grafana.grafana_user:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ team_name }} User"
+        login: "{{ user_login }}"
+        email: "{{ user_email }}"
+        password: "{{ user_password }}"
+        is_admin: false
+        state: present
+        validate_certs: false
+      register: created_user
+
+    # ------------------------------------------------------------------
+    # Ajouter l'utilisateur à la team
+    # ------------------------------------------------------------------
+
+    - name: Ensure user is member of team
+      community.grafana.grafana_team:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "{{ team_name }}"
+        email: "{{ user_email }}"
+        members:
+          - "{{ user_login }}"
+        state: present
+        validate_certs: false
+
+    - name: Display created/updated user info
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "User ajouté à une team Grafana existante"
+          - "============================================"
+          - "Team: {{ team_name }} (id={{ grafana_team_id }})"
+          - "User login: {{ user_login }}"
+          - "User email: {{ user_email }}"

@@ -291,6 +291,7 @@ Avant de laisser SFTPGo appeler le script, tu peux tester à la main.
 ```bash
 cd /srv/powerview
 source envs/powerview/bin/activate
+export $(grep -v '^#' .env | xargs)
 ```
 
 2. Lancer un dry-run sur un dossier de test (par ex. `/srv/sftpgo/data` si tu as déjà des fichiers) :
@@ -346,6 +347,8 @@ Pour tester à la main :
 ```bash
 cd /srv/powerview
 source envs/powerview/bin/activate
+export $(grep -v '^#' .env | xargs)
+
 ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml \
   --extra-vars "company_name=company1 campaign_name=campaign_test"
 ```

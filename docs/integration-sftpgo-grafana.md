@@ -145,6 +145,9 @@ Les playbooks Ansible se trouvent dans `grafana-automation/playbooks/` :
 - `delete_grafana_resources.yml`  
   - suppression des ressources Grafana d’un client (dashboards, folder, datasource, team).
 
+- `add_grafana_user_to_team.yml`  
+  - ajout d’un **utilisateur supplémentaire** dans une **team Grafana existante**.
+
 ### 4.1 Ressources créées pour un client
 
 Pour chaque `company_name`, le playbook de création :
@@ -193,13 +196,31 @@ Le playbook de création peut également :
 - créer un utilisateur Grafana par défaut pour la team, par exemple :
   - nom : `{{ company_name }} Default`  
   - login : `user_{{ company_name }}`  
-- ajouter cet utilisateur à la team `company_name`.
 
 Alternatives :
 
 - créer les utilisateurs manuellement via l’UI Grafana, puis les rattacher à la
   team du client ;
 - surcharger les variables Ansible pour utiliser un compte existant.
+
+Pour ajouter **un utilisateur supplémentaire** à une team existante (par exemple
+un nouvel utilisateur pour `company1`), on peut utiliser le playbook dédié
+`add_grafana_user_to_team.yml` :
+
+```bash
+cd /srv/powerview
+source envs/powerview/bin/activate
+export $(grep -v '^#' .env | xargs)
+
+ansible-playbook grafana-automation/playbooks/add_grafana_user_to_team.yml \
+  --extra-vars "team_name=company1 user_login_override=jdupont user_email_override=j.dupont@example.com"
+```
+
+Ce playbook :
+
+- vérifie que la team `team_name` existe dans Grafana ;
+- crée (ou met à jour) l’utilisateur Grafana avec le login / email fournis ;
+- ajoute cet utilisateur comme membre de la team.
 
 ---
 
@@ -263,6 +284,8 @@ Exemple d’appel :
 ```bash
 cd /srv/powerview
 source envs/powerview/bin/activate
+export $(grep -v '^#' .env | xargs)
+
 ansible-playbook grafana-automation/playbooks/delete_grafana_resources.yml \
   --extra-vars "company_name=company1"
 ```

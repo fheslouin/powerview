@@ -17,7 +17,7 @@ mais peuvent aussi être exécutés manuellement.
   - bucket par défaut : `{{ company_name }}`
   - **token utilisé : un token dédié par bucket**, créé/récupéré via
     `manage_influx_tokens.py` (`powerview_token_for_bucket_<company_name>`)
-- ✅ Création automatique d’un **dashboard par campagne** :
+- ✅ Création automatique d’un **dashboard global** :
   - rendu d’un template Jinja (`templates/dashboard.json.j2`) avec :
     - `company_name`
     - `campaign_name`
@@ -27,7 +27,7 @@ mais peuvent aussi être exécutés manuellement.
 - ✅ Application des **permissions** :
   - la team a accès en lecture (viewer) au dossier et au dashboard.
 - ✅ Marquage des campagnes déjà initialisées via un fichier :
-  - `data/<company_name>/<campaign_name>/.dashboard.created`
+  - `data/<company_name>/.dashboard.created`
 - ✅ Playbook de **nettoyage** pour supprimer :
   - dashboards, dossier, datasource du client, team Grafana associée,
   - et éventuellement un utilisateur Grafana donné (si tu le demandes).
