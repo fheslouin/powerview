@@ -22,13 +22,14 @@ def setup_influxdb_client() -> Tuple[InfluxDBClient, str]:
     Retourne:
         (client, org)
     """
-    url = os.getenv('INFLUXDB_HOST')
+    # On privilégie INFLUXDB_HOST, avec fallback sur INFLUXDB_URL
+    url = os.getenv('INFLUXDB_HOST') or os.getenv('INFLUXDB_URL')
     token = os.getenv('INFLUXDB_ADMIN_TOKEN')
     org = os.getenv('INFLUXDB_ORG')
 
     if not url or not token:
         raise ValueError(
-            "Missing required environment variables: INFLUXDB_HOST and INFLUXDB_ADMIN_TOKEN"
+            "Missing required environment variables: INFLUXDB_HOST/INFLUXDB_URL and INFLUXDB_ADMIN_TOKEN"
         )
 
     client = influxdb_client.InfluxDBClient(
@@ -149,13 +150,15 @@ def count_points_for_file(
 
     flux = f"""
 from(bucket: "{bucket}")
-  |> range(start: 0)
+  |> range(start: {start_time}, stop: {end_time})
   |> filter(fn: (r) => r._measurement == "electrical")
   |> filter(fn: (r) => r.campaign == "{campaign}")
   |> filter(fn: (r) => r.device_master_sn == "{device_master_sn}")
   |> filter(fn: (r) => r.file_name == "{file_name}")
   |> count()
 """
+
+    logger.debug("Flux query for count_points_for_file:\n%s", flux)
 
     tables = query_api.query(org=org, query=flux)
     total = 0

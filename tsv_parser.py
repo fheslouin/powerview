@@ -48,9 +48,18 @@ def setup_logging() -> None:
 
     - Niveau par défaut : INFO (surchageable via TSV_LOG_LEVEL)
     - Format simple avec timestamp / niveau / message
+
+    On évite d'empiler plusieurs handlers si le logging est déjà configuré
+    (ce qui provoquerait des logs en double).
     """
+    root_logger = logging.getLogger()
     level_name = os.getenv("TSV_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
+
+    if root_logger.handlers:
+        # Logging déjà configuré ailleurs : on ajuste juste le niveau
+        root_logger.setLevel(level)
+        return
 
     logging.basicConfig(
         level=level,
