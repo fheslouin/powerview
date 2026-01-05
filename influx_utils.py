@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -127,6 +127,16 @@ def write_run_summary_to_influx(
         logger.warning("Impossible d'écrire le résumé d'exécution dans InfluxDB: %s", e)
 
 
+def _parse_iso(ts: str) -> datetime:
+    """
+    Parse un timestamp ISO 8601 en datetime (timezone-aware si suffixe Z ou offset).
+    """
+    # datetime.fromisoformat gère les offsets (+00:00, etc.) mais pas le 'Z' nu avant 3.11
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    return datetime.fromisoformat(ts)
+
+
 def count_points_for_file(
     client: InfluxDBClient,
     org: str,
@@ -145,12 +155,32 @@ def count_points_for_file(
     On suppose que les points ont un tag 'file_name' avec le nom du fichier TSV.
 
     Schéma unifié : measurement unique 'electrical'.
+
+    Note : dans Flux, 'start' est inclusif et 'stop' est exclusif.
+    Pour inclure le dernier timestamp (end_time), on ajoute 1 seconde à end_time.
     """
     query_api = client.query_api()
 
+    try:
+        start_dt = _parse_iso(start_time)
+        end_dt = _parse_iso(end_time)
+        # On ajoute 1 seconde pour que la borne supérieure soit effectivement incluse
+        end_dt_inclusive = end_dt + timedelta(seconds=1)
+        start_flux = start_dt.isoformat()
+        end_flux = end_dt_inclusive.isoformat()
+    except Exception as e:
+        logger.warning(
+            "Impossible de parser start_time/end_time ('%s' / '%s'), utilisation brute dans Flux: %s",
+            start_time,
+            end_time,
+            e,
+        )
+        start_flux = start_time
+        end_flux = end_time
+
     flux = f"""
 from(bucket: "{bucket}")
-  |> range(start: {start_time}, stop: {end_time})
+  |> range(start: {start_flux}, stop: {end_flux})
   |> filter(fn: (r) => r._measurement == "electrical")
   |> filter(fn: (r) => r.campaign == "{campaign}")
   |> filter(fn: (r) => r.device_master_sn == "{device_master_sn}")

@@ -123,8 +123,7 @@ handle_upload() {
     if [[ -z "${file_path}" ]]; then
         log "No SFTPGO_ACTION_PATH provided, running parser on all TSV files in ${DATA_DIR} (en ignorant les fichiers PARSED_*)"
         if ! python3 "${TSV_PARSER}" \
-            --dataFolder "${DATA_DIR}" \
-            2>&1 | tee -a "${LOG_FILE}"; then
+            --dataFolder "${DATA_DIR}"; then
             log_error "TSV parser failed for dataFolder: ${DATA_DIR}"
         fi
     else
@@ -137,8 +136,7 @@ handle_upload() {
             log "Running parser for single file: ${file_path}"
             if ! python3 "${TSV_PARSER}" \
                 --dataFolder "${DATA_DIR}" \
-                --tsvFile "${file_path}" \
-                2>&1 | tee -a "${LOG_FILE}"; then
+                --tsvFile "${file_path}"; then
                 log_error "TSV parser failed for file: ${file_path}"
             fi
         fi
@@ -164,8 +162,7 @@ handle_mkdir() {
         fi
 
         if ! ansible-playbook "${ANSIBLE_PLAYBOOK}" \
-            --extra-vars "company_name=${company_name} campaign_name=${campaign_name}" \
-            2>&1 | tee -a "${LOG_FILE}"; then
+            --extra-vars "company_name=${company_name} campaign_name=${campaign_name}"; then
             log_error "Ansible playbook failed for: ${file_path}"
         fi
 
