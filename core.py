@@ -22,10 +22,11 @@ def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
     """
     Essaie de parser un timestamp issu du TSV en datetime.
 
-    On supporte plusieurs formats possibles, dans cet ordre :
-    - YYYY-MM-DD HH:MM:SS
-    - MM/DD/YY HH:MM:SS
-    - DD/MM/YY HH:MM:SS
+    Pour le format actuel MV_T302_V002 (T302), le format attendu est :
+
+        DD/MM/YY HH:MM:SS
+
+    Exemple : "05/01/26 10:00:00"  (5 janvier 2026 à 10h00)
 
     Retourne:
         - un datetime si le parsing réussit
@@ -35,19 +36,12 @@ def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
     if not ts:
         return None
 
-    formats = [
-        "%Y-%m-%d %H:%M:%S",  # format recommandé
-        "%m/%d/%y %H:%M:%S",  # ancien format US
-        "%d/%m/%y %H:%M:%S",  # ancien format EU
-    ]
+    fmt = "%d/%m/%y %H:%M:%S"
 
-    for fmt in formats:
-        try:
-            return datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-
-    return None
+    try:
+        return datetime.strptime(ts, fmt)
+    except ValueError:
+        return None
 
 
 class BaseTSVParser:
@@ -223,7 +217,7 @@ class MV_T302_V002_Parser(BaseTSVParser):
         line2 : liste "format / nom canal + unité" (2ème ligne)
         """
         device_master_sn = line1[0]
-        device_subtype = "tri" if line2[3].startswith("Ph") else "mono"
+        device_subtype = "tri" if len(line2) > 3 and line2[3].startswith("Ph") else "mono"
 
         channel_mappings: List[Dict[str, Any]] = []
         device_channel_counter: Dict[str, int] = {}
