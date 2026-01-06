@@ -17,7 +17,7 @@ from typing import List, Dict, Tuple, Any
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
-from core import TSVParserFactory, parse_tsv_header
+from core import TSVParserFactory, parse_tsv_header, parse_timestamp
 from fs_utils import (
     extract_path_components as _extract_path_components,
     find_tsv_files,
@@ -89,13 +89,11 @@ def _compute_time_range_from_tsv(tsv_file: str) -> Tuple[str, str]:
             if not parts:
                 continue
             timestamp_str = str(parts[0])
-            try:
-                ts = datetime.strptime(timestamp_str, "%m/%d/%y %H:%M:%S")
-            except ValueError:
-                try:
-                    ts = datetime.strptime(timestamp_str, "%d/%m/%y %H:%M:%S")
-                except ValueError:
-                    continue
+
+            ts = parse_timestamp(timestamp_str)
+            if ts is None:
+                continue
+
             # on considère que c'est du temps local, on le convertit en UTC naïf
             times.append(ts)
 

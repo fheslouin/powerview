@@ -18,6 +18,38 @@ class FileFormat(str, Enum):
     MV_T302_V002 = "MV_T302_V002"
 
 
+def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
+    """
+    Essaie de parser un timestamp issu du TSV en datetime.
+
+    On supporte plusieurs formats possibles, dans cet ordre :
+    - YYYY-MM-DD HH:MM:SS
+    - MM/DD/YY HH:MM:SS
+    - DD/MM/YY HH:MM:SS
+
+    Retourne:
+        - un datetime si le parsing réussit
+        - None sinon
+    """
+    ts = str(timestamp_str).strip()
+    if not ts:
+        return None
+
+    formats = [
+        "%Y-%m-%d %H:%M:%S",  # format recommandé
+        "%m/%d/%y %H:%M:%S",  # ancien format US
+        "%d/%m/%y %H:%M:%S",  # ancien format EU
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(ts, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
 class BaseTSVParser:
     """
     Interface de base pour les parseurs TSV.
@@ -92,15 +124,11 @@ class BaseTSVParser:
         for _, row in df.iterrows():
             timestamp_str = str(row[0])
 
-            try:
-                timestamp = datetime.strptime(timestamp_str, "%m/%d/%y %H:%M:%S")
-            except ValueError:
-                try:
-                    timestamp = datetime.strptime(timestamp_str, "%d/%m/%y %H:%M:%S")
-                except ValueError:
-                    logger.warning("Could not parse timestamp: %s", timestamp_str)
-                    nb_invalid_timestamps += 1
-                    continue
+            timestamp = parse_timestamp(timestamp_str)
+            if timestamp is None:
+                logger.warning("Could not parse timestamp: %s", timestamp_str)
+                nb_invalid_timestamps += 1
+                continue
 
             for mapping in channel_mappings:
                 col_idx = mapping["column_idx"]
