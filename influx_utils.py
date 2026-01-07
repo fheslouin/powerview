@@ -143,16 +143,14 @@ def count_points_for_file(
     bucket: str,
     campaign: str,
     device_master_sn: str,
-    file_name: str,
     start_time: str,
     end_time: str,
 ) -> int:
     """
-    Compte le nombre de points pour une campagne / device_master_sn / file_name
+    Compte le nombre de points pour une campagne / device_master_sn
     sur une plage temporelle explicite [start_time, end_time].
 
     start_time / end_time doivent être des timestamps ISO 8601 (UTC de préférence).
-    On suppose que les points ont un tag 'file_name' avec le nom du fichier TSV.
 
     Schéma unifié : measurement unique 'electrical'.
 
@@ -184,7 +182,6 @@ from(bucket: "{bucket}")
   |> filter(fn: (r) => r._measurement == "electrical")
   |> filter(fn: (r) => r.campaign == "{campaign}")
   |> filter(fn: (r) => r.device_master_sn == "{device_master_sn}")
-  |> filter(fn: (r) => r.file_name == "{file_name}")
   |> count()
 """
 

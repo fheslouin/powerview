@@ -113,6 +113,8 @@ class BaseTSVParser:
                 "mean": None,
             }
 
+        # On garde file_name uniquement pour les stats/rapports éventuels,
+        # mais on ne l'utilise plus comme tag dans InfluxDB.
         file_name = Path(tsv_file).name
 
         for _, row in df.iterrows():
@@ -149,7 +151,7 @@ class BaseTSVParser:
                 point = point.tag("device_subtype", mapping["device_subtype"])     # null/tri/mono
                 point = point.tag("device_master_sn", mapping["device_master_sn"]) # 02001171
                 point = point.tag("device_sn", mapping["device_sn"])               # 020011201
-                point = point.tag("file_name", file_name)
+                # NE PLUS ajouter file_name comme tag pour éviter la forte cardinalité
                 points.append(point)
 
                 cid = mapping["channel_id"]

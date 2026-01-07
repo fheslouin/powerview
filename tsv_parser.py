@@ -193,7 +193,6 @@ def process_tsv_file(
         # Vérification optionnelle : compter les points dans Influx pour ce fichier
         try:
             expected = len(points)
-            file_name = Path(tsv_file).name
 
             # Calcule la plage temporelle à partir du TSV (colonne 0)
             start_time_iso, end_time_iso = _compute_time_range_from_tsv(tsv_file)
@@ -204,7 +203,6 @@ def process_tsv_file(
                 bucket=bucket_name,
                 campaign=campaign_name,
                 device_master_sn=device_master_sn,
-                file_name=file_name,
                 start_time=start_time_iso,
                 end_time=end_time_iso,
             )
@@ -220,7 +218,7 @@ def process_tsv_file(
                     "pour le fichier %s sur [%s ; %s]",
                     expected,
                     actual,
-                    file_name,
+                    Path(tsv_file).name,
                     start_time_iso,
                     end_time_iso,
                 )
@@ -230,7 +228,7 @@ def process_tsv_file(
                     "pour le fichier %s sur [%s ; %s]",
                     expected,
                     actual,
-                    file_name,
+                    Path(tsv_file).name,
                     start_time_iso,
                     end_time_iso,
                 )
