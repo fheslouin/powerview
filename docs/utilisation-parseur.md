@@ -88,7 +88,33 @@ Ces tags sont construits à partir :
 Le parseur est basé sur une interface générique `BaseTSVParser` (dans `core.py`)
 et une implémentation actuelle `MV_T302_V002_Parser` pour le format `MV_T302_V002`.
 
-### 3.1 Interface `BaseTSVParser`
+### 3.1 Format de timestamp (T302 / MV_T302_V002)
+
+Pour les fichiers actuels de type **T302** (format `MV_T302_V002`), la première
+colonne de données (colonne 0) doit être au format :
+
+```text
+DD/MM/YY HH:MM:SS
+```
+
+Exemples :
+
+```text
+05/01/26 10:00:00
+05/01/26 10:10:00
+```
+
+Ce format est interprété comme :
+
+- `05/01/26` → **5 janvier 2026** (jour/mois/année sur 2 chiffres) ;
+- l’heure est considérée comme du temps local, puis stockée en UTC dans InfluxDB.
+
+Si un timestamp ne respecte pas ce format, la ligne est ignorée et un warning
+est loggé (`Could not parse timestamp: ...`).  
+Le compteur `nb_invalid_timestamps` dans le rapport reflète ce nombre de lignes
+ignorées pour cause de timestamp invalide.
+
+### 3.2 Interface `BaseTSVParser`
 
 Principales méthodes :
 
@@ -107,7 +133,7 @@ Principales méthodes :
   - Interprète les deux premières lignes (ou plus) pour déterminer la structure
     des colonnes (id de canal, unité, nom, etc.).
 
-### 3.2 Format `MV_T302_V002`
+### 3.3 Format `MV_T302_V002`
 
 L’implémentation `MV_T302_V002_Parser` gère un format spécifique de fichiers TSV
 produits par les appareils T302.
@@ -248,7 +274,7 @@ Chaque `channel_mapping` contient typiquement :
 
 1. Ouvre le fichier TSV.  
 2. Pour chaque ligne de données :
-   - parse le timestamp ;
+   - parse le timestamp (au format `DD/MM/YY HH:MM:SS`) ;
    - parse les valeurs de chaque canal ;
    - valide les types (timestamp valide, valeur numérique) ;
    - construit un `Point` InfluxDB avec :

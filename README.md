@@ -190,8 +190,12 @@ Pour plus de détails sur les options et le comportement du parseur :
 
 ## Tests
 
-Ce projet est un projet **Python**, pas un projet Node/JS : il n’y a pas de `package.json`,
-donc les commandes du type `yarn test` ou `npm test` ne sont pas pertinentes ici.
+Ce projet est un projet **Python**, pas un projet Node/JS :
+
+- il n’y a **pas** de `package.json` à la racine ;
+- les commandes `yarn test`, `npm test`, etc. ne sont **pas** supportées ici et
+  renverront logiquement une erreur du type :
+  `error Couldn't find a package.json file in "<chemin_du_repo>"`.
 
 Pour lancer les tests automatisés (par exemple ceux de `tests/test_tsv_parser.py`) :
 

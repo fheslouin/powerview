@@ -104,6 +104,9 @@ Pour supporter un nouveau format de fichier TSV :
 
 ### 3.1 Lancer les tests
 
+Ce projet est un projet **Python** (pas Node/JS) : il n’y a pas de `package.json`
+et les commandes `yarn test` / `npm test` ne sont pas pertinentes ici.
+
 Depuis `/srv/powerview` :
 
 ```bash
