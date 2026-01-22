@@ -279,7 +279,7 @@ class MV_T302_V002_Parser(BaseTSVParser):
 
             # channel_id = f"{device_type_prefix}{device_sn}_{channel_label}_M{device_master_sn}"
             channel_id = f"M{device_master_sn}_{device_type_prefix}{device_sn}_{channel_label}" \
-                if device_type == "master" \
+                if device_type != "master" \
                 else f"M{device_master_sn}_{channel_label}"
 
             channel_mappings.append(
