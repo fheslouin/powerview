@@ -81,9 +81,9 @@ def _compute_time_range_from_tsv(tsv_file: str) -> Tuple[str, str]:
     times: List[datetime] = []
 
     with open(tsv_file, "r", encoding="utf-8") as f:
-        # sauter les 2 lignes de header
-        next(f, None)
-        next(f, None)
+        # Pour les fichiers V003, il peut y avoir un header JSON + START_DATA.
+        # On lit tout le fichier et on ne garde que les lignes de données
+        # (parse_timestamp retournera None pour les autres).
         for line in f:
             parts = line.rstrip("\n").split("\t")
             if not parts:
@@ -94,7 +94,6 @@ def _compute_time_range_from_tsv(tsv_file: str) -> Tuple[str, str]:
             if ts is None:
                 continue
 
-            # on considère que c'est du temps local, on le convertit en UTC naïf
             times.append(ts)
 
     if not times:
@@ -134,6 +133,7 @@ def process_tsv_file(
         "nb_invalid_timestamps": 0,
         "nb_invalid_values": 0,
         "channels": {},
+        "file_header_meta": None,
         "nb_points_expected": None,
         "nb_points_in_influx": None,
         "time_start": None,
@@ -157,8 +157,17 @@ def process_tsv_file(
 
         # Lecture rapide du header pour récupérer le format
         with open(tsv_file, "r", encoding="utf-8") as f:
-            _line1 = f.readline().strip().split("\t")
-            line2 = f.readline().strip().split("\t")
+            first = f.readline().strip()
+            if first == "START_HEADER":
+                for line in f:
+                    line = line.strip()
+                    if line == "START_DATA":
+                        _line1 = f.readline().strip().split("\t")
+                        line2 = f.readline().strip().split("\t")
+                        break
+            else:
+                _line1 = first.split("\t")
+                line2 = f.readline().strip().split("\t")
         file_format = line2[0]
 
         logger.info("  Bucket: %s", bucket_name)
@@ -186,6 +195,7 @@ def process_tsv_file(
         file_report["nb_invalid_timestamps"] = stats.get("nb_invalid_timestamps", 0)
         file_report["nb_invalid_values"] = stats.get("nb_invalid_values", 0)
         file_report["channels"] = stats.get("channels", {})
+        file_report["file_header_meta"] = stats.get("file_header_meta")
 
         # Écriture Influx
         write_points(client, bucket_name, org, points)
@@ -382,6 +392,7 @@ def main():
                 "nb_invalid_timestamps": 0,
                 "nb_invalid_values": 0,
                 "channels": {},
+                "file_header_meta": None,
                 "nb_points_expected": None,
                 "nb_points_in_influx": None,
                 "time_start": None,
@@ -419,6 +430,7 @@ def main():
                 file_report["nb_invalid_timestamps"] = stats.get("nb_invalid_timestamps", 0)
                 file_report["nb_invalid_values"] = stats.get("nb_invalid_values", 0)
                 file_report["channels"] = stats.get("channels", {})
+                file_report["file_header_meta"] = stats.get("file_header_meta")
 
                 logger.info("  Points that would be created: %d", file_report["nb_points"])
                 successful += 1

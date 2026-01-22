@@ -37,7 +37,8 @@ def write_tmp_tsv(tmp_path: Path, content: str) -> Path:
 
 def test_parse_tsv_header_basic(tmp_path):
     """
-    Vérifie que parse_tsv_header extrait correctement les mappings de canaux.
+    Vérifie que parse_tsv_header extrait correctement les mappings de canaux
+    pour le format MV_T302_V002 avec le nouveau schéma de mapping.
     """
     # 1ère ligne : SN des devices
     # 2ème ligne : nom de canal + unité
@@ -50,7 +51,7 @@ def test_parse_tsv_header_basic(tmp_path):
     tmp_dir = tmp_path
     tsv_file = write_tmp_tsv(tmp_dir, content)
 
-    mappings, file_format = tsv_parser.parse_tsv_header(str(tsv_file))
+    mappings, file_format = parse_tsv_header(str(tsv_file))
 
     # file_format = première colonne de la 2ème ligne
     assert file_format == "MV_T302_V002"
@@ -63,22 +64,96 @@ def test_parse_tsv_header_basic(tmp_path):
     assert m0["column_idx"] == 1
     assert m0["device_sn"] == "02001171"
     assert m0["device_master_sn"] == "02001171"
-  #  assert m0["channel_number"] == 1
     assert m0["channel_name"] == "Ph 1"
     assert m0["unit"] == "V"
-    assert m0["channel_type"] == "master"
-    assert m0["channel_id"].startswith("M02001171_Ch1_M02001171")
+    # Nouveau schéma : device_type au lieu de channel_type
+    assert m0["device_type"] == "master"
+    # En mono, premier canal du master = U1
+    assert m0["channel_label"] == "U1"
+    # Nouveau schéma de channel_id : M<master>_M<sn>_<label>
+    assert m0["channel_id"] == "M02001171_M02001171_U1"
 
     # Deuxième canal : device esclave
     m1 = mappings[1]
     assert m1["column_idx"] == 2
     assert m1["device_sn"] == "04000466"
     assert m1["device_master_sn"] == "02001171"
-  #  assert m1["channel_number"] == 1
     assert m1["channel_name"] == "Voie1"
     assert m1["unit"] == "W"
-    assert m1["channel_type"] == "slave"
-    assert m1["channel_id"].startswith("S04000466_Ch1_M02001171")
+    assert m1["device_type"] == "slave"
+    # Pour un esclave, label = Ch1
+    assert m1["channel_label"] == "Ch1"
+    # Nouveau schéma de channel_id pour un slave : M<master>_<label>
+    assert m1["channel_id"] == "M02001171_Ch1"
+
+
+def test_parse_tsv_header_detects_tri_even_if_phases_not_at_fixed_positions(tmp_path):
+    """
+    Vérifie que la détection tri/mono ne dépend pas d'une position fixe (line2[3]),
+    mais de la présence de Ph 1 / Ph 2 / Ph 3 dans le header.
+
+    On construit un header où Ph 1/2/3 existent mais ne sont pas aux indices 1/2/3.
+    """
+    content = """
+    02001283\t02001283\t02001283\t02001283\t02001283\t02001283\t02001283
+    MV_T302_V002\tVoie1 W\tPh 1 V\tVoie2 W\tPh 2 V\tVoie3 W\tPh 3 V
+    24/10/25 20:50:00\t4.3\t241.21\t0.0\t238.74\t0.0\t242.76
+    """
+
+    tsv_file = write_tmp_tsv(tmp_path, content)
+    mappings, file_format = parse_tsv_header(str(tsv_file))
+    assert file_format == "MV_T302_V002"
+    assert len(mappings) == 6
+
+    # Tous les devices sont le master, donc device_subtype doit être "tri"
+    assert all(m["device_subtype"] == "tri" for m in mappings)
+
+    # En tri, les 3 premiers canaux du device (dans l'ordre des colonnes) sont U1/U2/U3
+    # Ici, on a 6 colonnes de mesure => labels attendus: U1, U2, U3, Ch1, Ch2, Ch3
+    labels = [m["channel_label"] for m in mappings]
+    assert labels == ["U1", "U2", "U3", "Ch1", "Ch2", "Ch3"]
+
+
+def test_parse_tsv_header_v003_with_json_header(tmp_path):
+    """
+    Vérifie que parse_tsv_header gère un fichier MV_T302_V003 avec START_HEADER/START_DATA.
+    """
+    content = """
+    START_HEADER
+    {"DataZoneCode":3,"DataTypeCode":2,"DataTimeSettings":"UTC","TimeZone":"CET-1CEST,M3.5.0,M10.5.0/3","TimeZoneName":"Europe/Paris","FileVersion":3,"MasterType":"Mono"}
+    END_HEADER
+    START_DATA
+    02001311\t02001311\t02001311
+    MV_T302_V003\tPh 1 V\tVoie1 W
+    21/01/26 08:15:24\t236.14\t0.0
+    21/01/26 08:20:00\t237.00\t1.0
+    END_DATA
+    """
+    tsv_file = write_tmp_tsv(tmp_path, content)
+
+    mappings, file_format = parse_tsv_header(str(tsv_file))
+
+    assert file_format == "MV_T302_V003"
+    # 2 colonnes de données (hors timestamp)
+    assert len(mappings) == 2
+
+    m0 = mappings[0]
+    assert m0["column_idx"] == 1
+    assert m0["device_sn"] == "02001311"
+    assert m0["device_master_sn"] == "02001311"
+    assert m0["channel_name"] == "Ph 1"
+    assert m0["unit"] == "V"
+    assert m0["device_type"] == "master"
+    assert m0["channel_label"] == "U1"
+
+    m1 = mappings[1]
+    assert m1["column_idx"] == 2
+    assert m1["device_sn"] == "02001311"
+    assert m1["device_master_sn"] == "02001311"
+    assert m1["channel_name"] == "Voie1"
+    assert m1["unit"] == "W"
+    assert m1["device_type"] == "master"
+    assert m1["channel_label"] == "Ch1"
 
 
 # ---------------------------------------------------------------------------
@@ -115,25 +190,83 @@ def test_parse_tsv_data_creates_points(monkeypatch, tmp_path):
     assert stats["nb_points"] == 2
 
     p0 = points[0]
-    # measurement = table_name
-    assert p0._name == "campaign1"
+    # measurement unifié
+    assert p0._name == "electrical"
 
     # tags
     tags = dict(p0._tags)
     assert tags["campaign"] == "campaign1"
     assert tags["channel_name"] == "Ph 1"
-    assert tags["unit"] == "V"
+    assert tags["channel_unit"] == "V"
     assert tags["device_master_sn"] == "02001171"
     assert tags["device_sn"] == "02001171"
-    assert tags["channel_type"] == "master"
-    assert tags["channel_number"] == "1"
 
     # field
     fields = dict(p0._fields)
-    assert fields["value"] == pytest.approx(242.25)
+    # field name = "<channel_id>_<unit>"
+    assert len(fields) == 1
+    value = list(fields.values())[0]
+    assert value == pytest.approx(242.25)
 
     # timestamp : on vérifie juste que c'est un entier (epoch seconds)
     assert isinstance(p0._time, int)
+
+
+def test_parse_tsv_data_v003_creates_points(tmp_path, caplog):
+    """
+    Vérifie que parse_tsv_data gère un fichier MV_T302_V003 et crée les bons points.
+    """
+    content = """
+    START_HEADER
+    {"DataZoneCode":3,"DataTypeCode":2,"DataTimeSettings":"UTC","TimeZone":"CET-1CEST,M3.5.0,M10.5.0/3","TimeZoneName":"Europe/Paris","FileVersion":3,"MasterType":"Mono"}
+    END_HEADER
+    START_DATA
+    02001311\t02001311\t02001311
+    MV_T302_V003\tPh 1 V\tVoie1 W
+    21/01/26 08:15:24\t236.14\t0.0
+    21/01/26 08:20:00\t237.00\t1.0
+    END_DATA
+    """
+    tsv_file = write_tmp_tsv(tmp_path, content)
+
+    mappings, file_format = parse_tsv_header(str(tsv_file))
+    assert file_format == "MV_T302_V003"
+    assert len(mappings) == 2
+
+    caplog.set_level("WARNING", logger="tsv_parser")
+
+    points, stats = parse_tsv_data(
+        str(tsv_file),
+        mappings,
+        campaign="campaign_v003",
+        bucket_name="company_v003",
+        table_name="electrical",
+    )
+
+    # 2 lignes de données * 2 canaux = 4 points
+    assert len(points) == 4
+    assert stats["nb_rows"] == 2
+    assert stats["nb_channels"] == 2
+    assert stats["nb_points"] == 4
+    # Le header JSON doit être présent dans les stats
+    header_meta = stats.get("file_header_meta")
+    assert isinstance(header_meta, dict)
+    assert header_meta.get("FileVersion") == 3
+    assert header_meta.get("MasterType") == "Mono"
+
+    p0 = points[0]
+    assert p0._name == "electrical"
+    tags = dict(p0._tags)
+    assert tags["campaign"] == "campaign_v003"
+    assert tags["device_master_sn"] == "02001311"
+    assert tags["device_sn"] == "02001311"
+    assert "channel_id" in tags
+    assert "channel_unit" in tags
+
+    fields = dict(p0._fields)
+    assert len(fields) == 1
+    v = list(fields.values())[0]
+    assert isinstance(v, float)
 
 
 def test_parse_tsv_data_invalid_timestamp_is_skipped(tmp_path, caplog):
@@ -221,7 +354,7 @@ def test_full_file_parsing_all_columns():
     assert tsv_path.exists(), f"Fichier de test manquant : {tsv_path}"
 
     # 1) Header : on doit avoir autant de mappings que de colonnes - 1 (timestamp)
-    mappings, file_format = tsv_parser.parse_tsv_header(str(tsv_path))
+    mappings, file_format = parse_tsv_header(str(tsv_path))
 
     # On relit les deux premières lignes pour compter les colonnes
     with tsv_path.open("r", encoding="utf-8") as f:
@@ -264,16 +397,16 @@ def test_full_file_parsing_all_columns():
     # - tags cohérents
     # - aucune valeur None
     for p in points[:10]:  # on échantillonne quelques points pour ne pas tout parcourir
-        assert p._name == "campaign1"
+        assert p._name == "electrical"
         tags = dict(p._tags)
         assert tags["campaign"] == "campaign1"
         assert "channel_id" in tags
         assert "channel_name" in tags
         assert "device_sn" in tags
-        assert "unit" in tags
+        assert "channel_unit" in tags
         fields = dict(p._fields)
-        assert "value" in fields
-        assert fields["value"] is not None
+        assert len(fields) == 1
+        assert list(fields.values())[0] is not None
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,8 @@ PowerView est composé des éléments suivants :
 5. **Utilitaires InfluxDB (`influx_utils.py`)**  
    - Création des buckets si besoin.  
    - Écriture des points.  
-   - Écriture des résumés d’exécution dans le bucket meta.
+   - Écriture des résumés d’exécution dans le bucket meta.  
+   - Vérification du nombre de points écrits pour un fichier donné.
 
 6. **Automatisation Grafana (Ansible + `manage_influx_tokens.py`)**  
    - Création des teams, folders, datasources, dashboards.  
@@ -127,11 +128,10 @@ Pour les mesures électriques :
 
 Exemples :
 
-- `M02001171_Ch1_M02001171_V`  
-- `M02001171_Ch2_M02001171_A`
+- `M02001171_M02001171_U1_V`  
+- `M02001171_Ch1_W`
 
-Chaque point représente une **ligne de données** du TSV (un timestamp) et peut
-contenir plusieurs fields (un par canal).
+Chaque point représente une **valeur de canal** à un instant donné (un timestamp).
 
 ### 3.3 Tags (bucket client)
 
@@ -139,15 +139,17 @@ Tags principaux :
 
 - `campaign` : nom de la campagne (dérivé du chemin) ;
 - `channel_id` : identifiant du canal ;
-- `channel_unit` : unité (V, A, etc.) ;
-- `channel_label` : label lisible ;
-- `channel_name` : nom technique ;
-- `device` : type d’appareil (ex. T302) ;
+- `channel_unit` : unité (V, W, etc.) ;
+- `channel_label` : label lisible (`U1`, `Ch1`, …) ;
+- `channel_name` : nom technique (ex. `Ph 1`, `Voie1`) ;
+- `device` : type d’appareil (ex. `MV2`) ;
 - `device_type`, `device_subtype` : typologie plus fine si disponible ;
 - `device_master_sn` : numéro de série maître (dérivé du chemin) ;
-- `device_sn` : numéro de série du module, si différent ;
-- `file_name` : nom du fichier TSV source ;
-- éventuellement d’autres tags selon le format.
+- `device_sn` : numéro de série du module, si différent.
+
+Le tag `file_name` n’est plus utilisé sur les points de mesure pour limiter la
+cardinalité. Le nom de fichier reste disponible dans le bucket meta et dans les
+rapports JSON.
 
 Ces tags permettent de filtrer/agréger les données dans Grafana.
 
@@ -155,19 +157,19 @@ Ces tags permettent de filtrer/agréger les données dans Grafana.
 
 Le bucket meta contient des points décrivant chaque exécution du parseur :
 
-- `measurement` (par exemple `tsv_run_summary`) ;
+- `measurement` (par exemple `tsv_parser_run` et `tsv_parser_file`) ;
 - tags possibles :
-  - `company` ;
+  - `status` (`success`, `partial_failure`, `error`, …) ;
+  - `bucket` ;
   - `campaign` ;
   - `device_master_sn` ;
-  - `file_name` ;
-  - `status` (`success`, `error`, etc.) ;
+  - `file_name` (nom du fichier TSV) ;
 - fields possibles :
-  - `points_written` ;
-  - `lines_total` ;
-  - `lines_ignored` ;
-  - `duration_ms` ;
-  - etc.
+  - `nb_files_total`, `nb_files_success`, `nb_files_failed` ;
+  - `nb_points_total` ;
+  - `duration_s` ;
+  - par fichier : `nb_rows`, `nb_channels`, `nb_points`,
+    `nb_invalid_timestamps`, `nb_invalid_values`, etc.
 
 Ce schéma permet de construire des dashboards de monitoring du parseur
 (derniers runs, taux d’erreur, etc.).
@@ -184,7 +186,10 @@ Ce schéma permet de construire des dashboards de monitoring du parseur
 - `parse_data` ;
 - `build_channel_mappings`.
 
-`MV_T302_V002_Parser` est l’implémentation actuelle pour le format `MV_T302_V002`.
+Implémentations actuelles :
+
+- `MV_T302_V002_Parser` pour le format `MV_T302_V002` ;
+- `MV_T302_V003_Parser` pour le format `MV_T302_V003` (avec header JSON).
 
 Pour ajouter un nouveau format :
 
@@ -197,9 +202,10 @@ Pour ajouter un nouveau format :
 
 `TSVParserFactory.get_parser(file_format: str) -> BaseTSVParser` :
 
-- prend en entrée une chaîne (ou un enum) représentant le format de fichier ;
-- retourne une instance du parser adapté (`MV_T302_V002_Parser`, etc.) ;
-- permet d’étendre facilement le support de nouveaux formats.
+- prend en entrée une chaîne représentant le format de fichier
+  (`MV_T302_V002`, `MV_T302_V003`, …) ;
+- mappe cette chaîne vers l’enum `FileFormat` ;
+- retourne une instance du parser adapté.
 
 ### 4.3 `tsv_parser.py`
 
@@ -208,9 +214,9 @@ Rôles principaux :
 - parser les arguments CLI ;
 - configurer les logs (`setup_logging`) ;
 - orchestrer l’appel à `parse_tsv_header`, `parse_tsv_data` ;
-- appeler `influx_utils` pour l’écriture InfluxDB ;
+- appeler `influx_utils` pour l’écriture InfluxDB et le bucket meta ;
 - appeler `fs_utils` pour le déplacement des fichiers ;
-- générer les rapports JSON et les résumés meta.
+- générer les rapports JSON.
 
 Fonctions clés :
 
