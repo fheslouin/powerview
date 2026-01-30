@@ -154,10 +154,10 @@ class BaseTSVParser:
                 # renvoie donc un epoch en secondes UTC.
                 point = point.time(int(timestamp.timestamp()), WritePrecision.S)
                 point = point.tag("campaign", campaign)                            # campagne de mesure
-                point = point.tag("channel_id", mapping["channel_id"])             # M02001171_Ch1_M020011201
+                point = point.tag("channel_id", mapping["channel_id"])             # M02001171_Ch1
                 point = point.tag("channel_unit", mapping["unit"])                 # V, W, Wa
-                point = point.tag("channel_label", mapping["channel_label"])       # "frigo"
-                point = point.tag("channel_name", mapping["channel_name"])         # Ui ou Chi
+                point = point.tag("channel_label", mapping["channel_label"])       # U1, Ch1, ...
+                point = point.tag("channel_name", mapping["channel_name"])         # Ph 1, Voie1, ...
                 point = point.tag("device", mapping["device"])                     # MV2
                 point = point.tag("device_type", mapping["device_type"])           # master/slave
                 point = point.tag("device_subtype", mapping["device_subtype"])     # null/tri/mono
@@ -248,7 +248,6 @@ class MV_T302_V002_Parser(BaseTSVParser):
             channel_info = line2[col_idx]
 
             device_type = "master" if device_sn == device_master_sn else "slave"
-            device_type_prefix = "M" if device_sn == device_master_sn else "S"
 
             # Compteur de canaux par device
             if device_sn not in device_channel_counter:
@@ -277,10 +276,10 @@ class MV_T302_V002_Parser(BaseTSVParser):
                 channel_name = channel_info
                 unit = ""
 
-            # channel_id = f"{device_type_prefix}{device_sn}_{channel_label}_M{device_master_sn}"
-            channel_id = f"M{device_master_sn}_{device_type_prefix}{device_sn}_{channel_label}" \
-                if device_type != "master" \
-                else f"M{device_master_sn}_{channel_label}"
+            # Schéma unifié :
+            # - master : M<master>_<label>
+            # - slave  : M<master>_<label>
+            channel_id = f"M{device_master_sn}_{channel_label}"
 
             channel_mappings.append(
                 {
@@ -307,15 +306,36 @@ class MV_T302_V003_Parser(BaseTSVParser):
     """
 
     @classmethod
-    def build_channel_mappings(cls, line1, line2):
+    def build_channel_mappings(
+        cls,
+        line1,
+        line2,
+        header_meta: Optional[Dict[str, Any]] = None,
+    ):
         """
         line1 : SN devices (1ère ligne après START_DATA)
         line2 : format + nom canal + unité (2ème ligne après START_DATA)
+        header_meta : dict issu du JSON entre START_HEADER / END_HEADER (optionnel)
         """
         device_master_sn = line1[0]
 
-        # D'après l'exemple, MasterType = Mono
-        device_subtype = "mono"
+        # Détection subtype :
+        # - priorité au JSON (MasterType)
+        # - fallback sur présence de Ph 1/2/3 dans le header
+        device_subtype: Optional[str] = None
+        if header_meta:
+            mt = str(header_meta.get("MasterType", "")).strip().lower()
+            if mt == "tri":
+                device_subtype = "tri"
+            elif mt == "mono":
+                device_subtype = "mono"
+
+        if device_subtype is None:
+            header_labels = [str(x).strip() for x in line2[1:]]  # ignore file_format
+            has_ph1 = any(re.match(r"^Ph\s*1\b", s) for s in header_labels)
+            has_ph2 = any(re.match(r"^Ph\s*2\b", s) for s in header_labels)
+            has_ph3 = any(re.match(r"^Ph\s*3\b", s) for s in header_labels)
+            device_subtype = "tri" if (has_ph1 and has_ph2 and has_ph3) else "mono"
 
         channel_mappings: List[Dict[str, Any]] = []
         device_channel_counter: Dict[str, int] = {}
@@ -325,7 +345,6 @@ class MV_T302_V003_Parser(BaseTSVParser):
             channel_info = line2[col_idx]
 
             device_type = "master" if device_sn == device_master_sn else "slave"
-            device_type_prefix = "M" if device_sn == device_master_sn else "S"
 
             # Compteur de canaux par device
             if device_sn not in device_channel_counter:
@@ -333,12 +352,21 @@ class MV_T302_V003_Parser(BaseTSVParser):
             device_channel_counter[device_sn] += 1
             channel_number = device_channel_counter[device_sn]
 
-            # Même logique que V002 mono pour les labels
+            # Labels :
+            # - master tri : U1/U2/U3 puis Ch1/Ch2/...
+            # - master mono : U1 puis Ch1/Ch2/...
+            # - slave : Ch1/Ch2/...
             if device_type == "master":
-                if channel_number <= 1:
-                    channel_label = f"U{channel_number}"
+                if device_subtype == "tri":
+                    if channel_number <= 3:
+                        channel_label = f"U{channel_number}"
+                    else:
+                        channel_label = f"Ch{channel_number-3}"
                 else:
-                    channel_label = f"Ch{channel_number-1}"
+                    if channel_number <= 1:
+                        channel_label = f"U{channel_number}"
+                    else:
+                        channel_label = f"Ch{channel_number-1}"
             else:
                 channel_label = f"Ch{channel_number}"
 
@@ -350,12 +378,10 @@ class MV_T302_V003_Parser(BaseTSVParser):
                 channel_name = channel_info
                 unit = ""
 
-            # Même schéma de channel_id que V002
-            channel_id = (
-                f"M{device_master_sn}_{device_type_prefix}{device_sn}_{channel_label}"
-                if device_type == "master"
-                else f"M{device_master_sn}_{channel_label}"
-            )
+            # Schéma unifié :
+            # - master : M<master>_<label>
+            # - slave  : M<master>_<label>
+            channel_id = f"M{device_master_sn}_{channel_label}"
 
             channel_mappings.append(
                 {
@@ -430,9 +456,9 @@ class MV_T302_V003_Parser(BaseTSVParser):
         """
         Pour V003, on lit jusqu'à START_DATA, puis on utilise build_channel_mappings.
         """
-        _header_meta, line1, line2, _ = self._read_header_and_data(tsv_file)
+        header_meta, line1, line2, _ = self._read_header_and_data(tsv_file)
         file_format = line2[0]
-        channel_mappings, _ = self.build_channel_mappings(line1, line2)
+        channel_mappings, _ = self.build_channel_mappings(line1, line2, header_meta=header_meta)
         return channel_mappings, file_format
 
     def parse_data(
@@ -548,8 +574,8 @@ class MV_T302_V003_Parser(BaseTSVParser):
         """
         Parse complet V003 : header + data.
         """
-        _header_meta, line1, line2, _data_lines = self._read_header_and_data(tsv_file)
-        channel_mappings, _ = self.build_channel_mappings(line1, line2)
+        header_meta, line1, line2, _data_lines = self._read_header_and_data(tsv_file)
+        channel_mappings, _ = self.build_channel_mappings(line1, line2, header_meta=header_meta)
         return self.parse_data(tsv_file, channel_mappings, campaign, bucket_name, table_name)
 
 
@@ -612,6 +638,8 @@ def parse_tsv_header(tsv_file: str) -> Tuple[List[Dict], str]:
     parser = TSVParserFactory.get_parser(file_format)
 
     if hasattr(parser, "build_channel_mappings"):
+        # Pour V003, parse_tsv_header() ne lit pas le JSON.
+        # => build_channel_mappings V003 doit pouvoir détecter tri/mono via Ph1/2/3.
         channel_mappings, _ = parser.build_channel_mappings(line1, line2)
     else:
         # Fallback générique : on laisse le parser relire le fichier

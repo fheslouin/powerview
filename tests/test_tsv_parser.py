@@ -70,8 +70,8 @@ def test_parse_tsv_header_basic(tmp_path):
     assert m0["device_type"] == "master"
     # En mono, premier canal du master = U1
     assert m0["channel_label"] == "U1"
-    # Nouveau schéma de channel_id : M<master>_M<sn>_<label>
-    assert m0["channel_id"] == "M02001171_M02001171_U1"
+    # Nouveau schéma de channel_id : M<master>_<label>
+    assert m0["channel_id"] == "M02001171_U1"
 
     # Deuxième canal : device esclave
     m1 = mappings[1]
@@ -145,6 +145,7 @@ def test_parse_tsv_header_v003_with_json_header(tmp_path):
     assert m0["unit"] == "V"
     assert m0["device_type"] == "master"
     assert m0["channel_label"] == "U1"
+    assert m0["channel_id"] == "M02001311_U1"
 
     m1 = mappings[1]
     assert m1["column_idx"] == 2
@@ -154,6 +155,87 @@ def test_parse_tsv_header_v003_with_json_header(tmp_path):
     assert m1["unit"] == "W"
     assert m1["device_type"] == "master"
     assert m1["channel_label"] == "Ch1"
+    assert m1["channel_id"] == "M02001311_Ch1"
+
+
+def test_parse_tsv_header_v003_real_file_utc_metadata_4_all_mapping_fields():
+    """
+    Test d'intégration sur le fichier réel :
+    data/test_v003_utc_metadata_4/02000800/T302_260128_171459_UTC.tsv
+
+    Objectif :
+    - vérifier le format détecté (MV_T302_V003)
+    - vérifier le nombre de mappings
+    - vérifier que chaque mapping contient exactement les champs attendus
+      (et que leurs valeurs sont cohérentes)
+    """
+    project_root = Path(__file__).resolve().parents[1]
+    tsv_path = (
+            project_root
+            / "data"
+            / "test_v003_utc_metadata_4"
+            / "02000800"
+            / "T302_260128_171459_UTC.tsv"
+    )
+
+    assert tsv_path.exists(), f"Fichier de test manquant : {tsv_path}"
+
+    mappings, file_format = parse_tsv_header(str(tsv_path))
+
+    assert file_format == "MV_T302_V003"
+    # Dans ce fichier : timestamp + 6 colonnes de mesure => 6 mappings
+    assert len(mappings) == 6
+
+    # Champs attendus dans un mapping (schéma actuel des tests)
+    expected_keys = {
+        "column_idx",
+        "device_sn",
+        "device_master_sn",
+        "device",
+        "device_type",
+        "device_subtype",
+        "channel_name",
+        "unit",
+        "channel_label",
+        "channel_id",
+    }
+
+    # Vérifie qu'on n'oublie aucun champ et qu'on n'a pas de champ surprise
+    for m in mappings:
+        assert set(m.keys()) == expected_keys
+
+    # Header data du fichier :
+    # MV_T302_V003  Ph 1 V  Ph 2 V  Ph 3 V  Voie1 W  Voie2 W  Voie3 W
+    expected = [
+        # col_idx, channel_name, unit, label, device_type
+        (1, "Ph 1", "V", "U1", "master"),
+        (2, "Ph 2", "V", "U2", "master"),
+        (3, "Ph 3", "V", "U3", "master"),
+        (4, "Voie1", "W", "Ch1", "master"),
+        (5, "Voie2", "W", "Ch2", "master"),
+        (6, "Voie3", "W", "Ch3", "master"),
+    ]
+
+    for m, (col_idx, ch_name, unit, label, dev_type) in zip(mappings, expected):
+        assert m["column_idx"] == col_idx
+
+        # SN : dans ce fichier, toutes les colonnes ont 02000800
+        assert m["device_sn"] == "02000800"
+        assert m["device_master_sn"] == "02000800"
+
+        # device / type / subtype
+        assert m["device_type"] == dev_type
+        assert m["device_subtype"] == "tri"
+        assert isinstance(m["device"], str)
+        assert m["device"] != ""
+
+        # canal
+        assert m["channel_name"] == ch_name
+        assert m["unit"] == unit
+        assert m["channel_label"] == label
+
+        # channel_id : master : M<master>_<label>
+        assert m["channel_id"] == f"M02000800_{label}"
 
 
 # ---------------------------------------------------------------------------
