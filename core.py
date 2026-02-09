@@ -278,8 +278,11 @@ class MV_T302_V002_Parser(BaseTSVParser):
 
             # Schéma unifié :
             # - master : M<master>_<label>
-            # - slave  : M<master>_<label>
-            channel_id = f"M{device_master_sn}_{channel_label}"
+            # - slave  : M<master>_S<slave_sn>_<label>
+            if device_type == "master":
+                channel_id = f"M{device_master_sn}_{channel_label}"
+            else:
+                channel_id = f"M{device_master_sn}_S{device_sn}_{channel_label}"
 
             channel_mappings.append(
                 {
@@ -380,8 +383,11 @@ class MV_T302_V003_Parser(BaseTSVParser):
 
             # Schéma unifié :
             # - master : M<master>_<label>
-            # - slave  : M<master>_<label>
-            channel_id = f"M{device_master_sn}_{channel_label}"
+            # - slave  : M<master>_S<slave_sn>_<label>
+            if device_type == "master":
+                channel_id = f"M{device_master_sn}_{channel_label}"
+            else:
+                channel_id = f"M{device_master_sn}_S{device_sn}_{channel_label}"
 
             channel_mappings.append(
                 {
