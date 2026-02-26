@@ -183,8 +183,6 @@
         src: "{{ dashboard_template }}"
         dest: "{{ campaign_dashboard_json }}"
         mode: "0644"
-      vars:
-        user_login: "{{ user_login }}"
       when: dashboard_template_stat.stat.exists
 
     - name: Import company dashboard (idempotent via UID fixe)
