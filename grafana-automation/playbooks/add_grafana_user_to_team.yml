@@ -19,8 +19,8 @@
     dashboard_template: "{{ playbook_dir }}/../templates/dashboard.json.j2"
     campaign_dashboard_json: "/srv/powerview/dashboard_campaign.json"
 
-    # UID déterministe pour l'idempotence du dashboard (un par company)
-    campaign_dashboard_uid: "powerview_{{ company_name }}"
+    # UID déterministe pour l'idempotence du dashboard (un par user)
+    campaign_dashboard_uid: "powerview_{{ company_name }}_{{ user_login }}"
 
     # user_login / user_email / user_password peuvent être surchargés via --extra-vars
     user_login: "{{ user_login_override | default('user_' ~ team_name, true) }}"
@@ -183,6 +183,8 @@
         src: "{{ dashboard_template }}"
         dest: "{{ campaign_dashboard_json }}"
         mode: "0644"
+      vars:
+        user_login: "{{ user_login }}"
       when: dashboard_template_stat.stat.exists
 
     - name: Import company dashboard (idempotent via UID fixe)
