@@ -414,6 +414,7 @@
         datasource_uid: "{{ created_datasource.datasource.uid }}"
         datasource_id: "{{ created_datasource.datasource.id }}"
         datasource_client_id: "{{ datasource_client_id }}"
+        user_login: "{{ company_user_login }}"
       when:
         - not company_created.stat.exists
         - dashboard_template_stat.stat.exists
