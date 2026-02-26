@@ -236,7 +236,7 @@
       "id": 2,
       "options": {
         "forcedBucket": "{{ company_name }}",
-        "forcedClientId": "{{ datasource_client_id }}",
+        "forcedClientId": "{{ company_name }}_{{ user_login }}",
         "forcedDatasourceId": {{ datasource_id }},
         "forcedMeasurement": "electrical"
       },
@@ -297,7 +297,7 @@
           ],
           "method": "GET",
           "queryParams": "",
-          "urlPath": "/clients/{{ datasource_client_id }}/series-config/configs?campaign=${campaign}"
+          "urlPath": "/clients/{{ company_name }}_{{ user_login }}/series-config/configs?campaign=${campaign}"
         },
         "refresh": 1,
         "regex": "",
