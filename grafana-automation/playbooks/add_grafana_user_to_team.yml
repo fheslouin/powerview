@@ -11,7 +11,16 @@
     grafana_api_token: "{{ lookup('ansible.builtin.env', 'GRAFANA_API_TOKEN') | default('', true) }}"
 
     # Nom de la team Grafana existante (ex: company1), à passer via --extra-vars
-    # team_name: "company1"
+
+    # Par défaut, on considère que la team correspond à la company.
+    company_name: "{{ company_name_override | default(team_name, true) }}"
+
+    # Template Jinja pour le dashboard de company
+    dashboard_template: "{{ playbook_dir }}/../templates/dashboard.json.j2"
+    campaign_dashboard_json: "/srv/powerview/dashboard_campaign.json"
+
+    # UID déterministe pour l'idempotence du dashboard (un par company)
+    campaign_dashboard_uid: "powerview_{{ company_name }}"
 
     # user_login / user_email / user_password peuvent être surchargés via --extra-vars
     user_login: "{{ user_login_override | default('user_' ~ team_name, true) }}"
@@ -130,3 +139,66 @@
           - "Team: {{ team_name }} (id={{ grafana_team_id }})"
           - "User login: {{ user_login }}"
           - "User email: {{ user_email }}"
+
+    # ------------------------------------------------------------------
+    # Dashboard via template Jinja
+    # ------------------------------------------------------------------
+
+    - name: Ensure dashboard template exists
+      ansible.builtin.stat:
+        path: "{{ dashboard_template }}"
+      register: dashboard_template_stat
+
+    - name: Fail if dashboard template is missing
+      ansible.builtin.fail:
+        msg: >
+          Le template de dashboard est introuvable :
+          {{ dashboard_template }}
+          Assure-toi que le fichier 'grafana-automation/templates/dashboard.json.j2'
+          est bien présent sur le serveur.
+      when: not dashboard_template_stat.stat.exists
+
+    - name: Get datasource influxdb_<company> by name
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: ds_get
+
+    - name: Set datasource facts for dashboard template
+      ansible.builtin.set_fact:
+        datasource_uid: "{{ ds_get.json.uid }}"
+        datasource_id: "{{ ds_get.json.id }}"
+        datasource_client_id: >-
+          {{
+            (ds_get.json.jsonData.clientId
+             if (ds_get.json.jsonData is defined and 'clientId' in ds_get.json.jsonData)
+             else (company_name ~ '_' ~ user_login))
+          }}
+
+    - name: Render company dashboard JSON from template
+      ansible.builtin.template:
+        src: "{{ dashboard_template }}"
+        dest: "{{ campaign_dashboard_json }}"
+        mode: "0644"
+      vars:
+        company_name: "{{ company_name }}"
+        datasource_uid: "{{ datasource_uid }}"
+        datasource_id: "{{ datasource_id }}"
+        datasource_client_id: "{{ datasource_client_id }}"
+      when: dashboard_template_stat.stat.exists
+
+    - name: Import company dashboard (idempotent via UID fixe)
+      community.grafana.grafana_dashboard:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        state: present
+        path: "{{ campaign_dashboard_json }}"
+        folder: "{{ company_name }}"
+        uid: "{{ campaign_dashboard_uid }}"
+        overwrite: true
+        validate_certs: false
+      register: imported_dashboard
