@@ -124,7 +124,6 @@
         url_username: "{{ grafana_username }}"
         url_password: "{{ grafana_password }}"
         name: "{{ team_name }}"
-        email: "{{ user_email }}"
         members:
           - "{{ user_login }}"
         state: present
