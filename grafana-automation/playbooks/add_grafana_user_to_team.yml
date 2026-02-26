@@ -183,11 +183,6 @@
         src: "{{ dashboard_template }}"
         dest: "{{ campaign_dashboard_json }}"
         mode: "0644"
-      vars:
-        company_name: "{{ company_name }}"
-        datasource_uid: "{{ datasource_uid }}"
-        datasource_id: "{{ datasource_id }}"
-        datasource_client_id: "{{ datasource_client_id }}"
       when: dashboard_template_stat.stat.exists
 
     - name: Import company dashboard (idempotent via UID fixe)
