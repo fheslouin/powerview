@@ -437,3 +437,4 @@ Toute la documentation détaillée est dans le dossier [`docs/`](docs/) :
 - Auteur : Adecwatts  
 - Contact : support@adecwatts.com  
 - Licence : à préciser selon ton choix (MIT, Apache‑2.0, propriétaire, etc.).
+# powerview_web
