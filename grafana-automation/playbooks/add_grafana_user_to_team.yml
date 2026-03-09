@@ -107,7 +107,9 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
         method: GET
-        headers: "{{ grafana_auth_headers }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         status_code: [200, 404]
         validate_certs: false
       register: user_lookup_check
@@ -116,9 +118,9 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/admin/users"
         method: POST
-        headers:
-          Authorization: "Bearer {{ grafana_api_token }}"
-          Content-Type: "application/json"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         body_format: json
         body:
           name: "{{ team_name }} User"
@@ -138,7 +140,9 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
         method: GET
-        headers: "{{ grafana_auth_headers }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         status_code: 200
         validate_certs: false
       register: user_info
