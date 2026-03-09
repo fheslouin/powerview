@@ -229,7 +229,7 @@
       when: not dashboard_template_stat.stat.exists
 
     # ------------------------------------------------------------------
-    # Datasource InfluxDB dédiée à cet utilisateur (clientId = user_login)
+    # Datasource InfluxDB dédiée à cet utilisateur (clientId = company_name_user_login)
     # ------------------------------------------------------------------
 
     - name: Ensure manage_influx_tokens.py is present
@@ -284,7 +284,7 @@
           triphasicList: []
           virtualSeries: []
           seriesConfigApiUrl: "/api/datasources/proxy/25"
-          clientId: "{{ user_login }}"
+          clientId: "{{ company_name }}_{{ user_login }}"
         additional_secure_json_data:
           httpHeaderValue1: "Token {{ influxdb_bucket_token }}"
           token: "{{ influxdb_bucket_token }}"
@@ -331,7 +331,7 @@
                           'triphasicList': [],
                           'virtualSeries': [],
                           'seriesConfigApiUrl': '/api/datasources/proxy/25',
-                          'clientId': user_login
+                          'clientId': company_name ~ '_' ~ user_login
                         },
                         recursive=True
                       )
@@ -357,7 +357,7 @@
       ansible.builtin.set_fact:
         datasource_uid: "{{ ds_get.json.uid }}"
         datasource_id: "{{ ds_get.json.id }}"
-        datasource_client_id: "{{ user_login }}"
+        datasource_client_id: "{{ company_name }}_{{ user_login }}"
 
     - name: Render company dashboard JSON from template
       ansible.builtin.template:
@@ -412,5 +412,5 @@
           - "Team: {{ team_name }} (id={{ grafana_team_id }})"
           - "User login: {{ user_login }}"
           - "User email: {{ user_email }}"
-          - "Datasource: influxdb_{{ company_name }}_{{ user_login }} (clientId={{ user_login }})"
+          - "Datasource: influxdb_{{ company_name }}_{{ user_login }} (clientId={{ company_name }}_{{ user_login }})"
           - "Dashboard UID: {{ campaign_dashboard_uid }} (Editor pour {{ user_login }}, Viewer pour la team)"
