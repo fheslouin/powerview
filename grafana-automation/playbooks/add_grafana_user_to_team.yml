@@ -9,6 +9,9 @@
     grafana_username: "{{ lookup('ansible.builtin.env', 'GRAFANA_USERNAME') }}"
     grafana_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_PASSWORD') }}"
     grafana_api_token: "{{ lookup('ansible.builtin.env', 'GRAFANA_API_TOKEN') | default('', true) }}"
+    influxdb_admin_token: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ADMIN_TOKEN') }}"
+    influxdb_org: "{{ lookup('ansible.builtin.env', 'INFLUXDB_ORG') }}"
+    influxdb_host: "{{ lookup('ansible.builtin.env', 'INFLUXDB_HOST') }}"
 
     # Nom de la team Grafana existante (ex: company1), à passer via --extra-vars
 
@@ -158,25 +161,136 @@
           est bien présent sur le serveur.
       when: not dashboard_template_stat.stat.exists
 
-    - name: Get datasource influxdb_<company> by name
+    # ------------------------------------------------------------------
+    # Datasource InfluxDB dédiée à cet utilisateur (clientId = user_login)
+    # ------------------------------------------------------------------
+
+    - name: Ensure manage_influx_tokens.py is present
+      ansible.builtin.stat:
+        path: "/srv/powerview/manage_influx_tokens.py"
+      register: manage_tokens_script
+
+    - name: Fail if manage_influx_tokens.py is missing
+      ansible.builtin.fail:
+        msg: "Le script /srv/powerview/manage_influx_tokens.py est introuvable."
+      when: not manage_tokens_script.stat.exists
+
+    - name: Create or get dedicated InfluxDB token for bucket
+      ansible.builtin.command: >
+        python3 /srv/powerview/manage_influx_tokens.py
+        --bucket {{ company_name }}
+      register: bucket_token_cmd
+      changed_when: false
+
+    - name: Set fact for bucket token
+      ansible.builtin.set_fact:
+        influxdb_bucket_token: "{{ bucket_token_cmd.stdout | trim }}"
+
+    - name: Check if user datasource already exists
       ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}"
+        url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}_{{ user_login }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: [200, 404]
+        validate_certs: false
+      register: existing_user_ds
+
+    - name: Create user InfluxDB datasource
+      community.grafana.grafana_datasource:
+        url: "{{ grafana_url }}"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        name: "influxdb_{{ company_name }}_{{ user_login }}"
+        ds_type: influxdb
+        ds_url: "{{ influxdb_url | default('http://influxdb:8086') }}"
+        access: proxy
+        is_default: false
+        additional_json_data:
+          version: "Flux"
+          organization: "{{ influxdb_org }}"
+          defaultBucket: "{{ company_name }}"
+          tlsSkipVerify: true
+          httpMode: "POST"
+          httpHeaderName1: "Authorization"
+          readOnly: true
+          channelsList: []
+          triphasicList: []
+          virtualSeries: []
+          seriesConfigApiUrl: "/api/datasources/proxy/25"
+          clientId: "{{ user_login }}"
+        additional_secure_json_data:
+          httpHeaderValue1: "Token {{ influxdb_bucket_token }}"
+          token: "{{ influxdb_bucket_token }}"
+        state: present
+        validate_certs: false
+      register: created_user_ds
+      when: existing_user_ds.status == 404
+
+    - name: Get user datasource by name
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}_{{ user_login }}"
         method: GET
         headers: "{{ grafana_auth_headers }}"
         status_code: 200
         validate_certs: false
       register: ds_get
 
+    - name: Patch user datasource to use custom plugin type
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/{{ ds_get.json.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ grafana_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: >-
+          {{
+            ds_get.json
+            | combine(
+                {
+                  'type': 'influxdb-adecwatts-datasource',
+                  'jsonData': (
+                    (ds_get.json.jsonData | default({}))
+                    | combine(
+                        {
+                          'httpHeaderName1': 'Authorization',
+                          'version': 'Flux',
+                          'organization': influxdb_org,
+                          'defaultBucket': company_name,
+                          'tlsSkipVerify': true,
+                          'httpMode': 'POST',
+                          'readOnly': true,
+                          'channelsList': [],
+                          'triphasicList': [],
+                          'virtualSeries': [],
+                          'seriesConfigApiUrl': '/api/datasources/proxy/25',
+                          'clientId': user_login
+                        },
+                        recursive=True
+                      )
+                  ),
+                  'secureJsonData': (
+                    (ds_get.json.secureJsonData | default({}))
+                    | combine(
+                        {
+                          'httpHeaderValue1': 'Token ' ~ influxdb_bucket_token,
+                          'token': influxdb_bucket_token
+                        },
+                        recursive=True
+                      )
+                  )
+                },
+                recursive=True
+              )
+          }}
+        status_code: 200
+        validate_certs: false
+
     - name: Set datasource facts for dashboard template
       ansible.builtin.set_fact:
         datasource_uid: "{{ ds_get.json.uid }}"
         datasource_id: "{{ ds_get.json.id }}"
-        datasource_client_id: >-
-          {{
-            (ds_get.json.jsonData.clientId
-             if (ds_get.json.jsonData is defined and 'clientId' in ds_get.json.jsonData)
-             else (company_name ~ '_' ~ user_login))
-          }}
+        datasource_client_id: "{{ user_login }}"
 
     - name: Render company dashboard JSON from template
       ansible.builtin.template:
@@ -197,3 +311,48 @@
         overwrite: true
         validate_certs: false
       register: imported_dashboard
+
+    # ------------------------------------------------------------------
+    # Permissions : team=Viewer, cet utilisateur=Editor sur son dashboard
+    # ------------------------------------------------------------------
+
+    - name: Lookup user ID by login
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: user_lookup
+
+    - name: Set dashboard permissions (team=Viewer, owner=Editor)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/dashboards/uid/{{ campaign_dashboard_uid }}/permissions"
+        method: POST
+        headers: "{{ grafana_auth_headers }}"
+        body_format: json
+        body:
+          items:
+            - teamId: "{{ grafana_team_id }}"
+              permission: 1
+            - userId: "{{ user_lookup.json.id }}"
+              permission: 2
+        status_code: 200
+        validate_certs: false
+
+    - name: Clean up temporary dashboard file
+      ansible.builtin.file:
+        path: "{{ campaign_dashboard_json }}"
+        state: absent
+
+    - name: Display created/updated user info
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "User ajouté à une team Grafana existante"
+          - "============================================"
+          - "Team: {{ team_name }} (id={{ grafana_team_id }})"
+          - "User login: {{ user_login }}"
+          - "User email: {{ user_email }}"
+          - "Datasource: influxdb_{{ company_name }}_{{ user_login }} (clientId={{ user_login }})"
+          - "Dashboard UID: {{ campaign_dashboard_uid }} (Editor pour {{ user_login }}, Viewer pour la team)"

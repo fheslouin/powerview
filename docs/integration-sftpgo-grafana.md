@@ -213,7 +213,7 @@ source envs/powerview/bin/activate
 export $(grep -v '^#' .env | xargs)
 
 ansible-playbook grafana-automation/playbooks/add_grafana_user_to_team.yml \
-  --extra-vars "team_name=toto user_login_override=tata user_email_override=tata@company4.com"
+  --extra-vars "team_name=util user_login_override=util2 user_email_override=util2@util.com"
 ```
 
 Ce playbook :
