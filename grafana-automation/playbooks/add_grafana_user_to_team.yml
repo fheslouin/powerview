@@ -100,38 +100,76 @@
           - "team_id={{ grafana_team_id }}"
 
     # ------------------------------------------------------------------
-    # Créer / assurer l'existence de l'utilisateur via module grafana_user
+    # Créer / assurer l'existence de l'utilisateur via API REST
     # ------------------------------------------------------------------
 
-    - name: Ensure Grafana user exists (création/mise à jour)
-      community.grafana.grafana_user:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        name: "{{ team_name }} User"
-        login: "{{ user_login }}"
-        email: "{{ user_email }}"
-        password: "{{ user_password }}"
-        is_admin: false
-        state: present
+    - name: Check if Grafana user already exists
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: [200, 404]
         validate_certs: false
-      register: created_user
+      register: user_lookup_check
+
+    - name: Create Grafana user (if not exists)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/admin/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ grafana_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ team_name }} User"
+          login: "{{ user_login }}"
+          email: "{{ user_email }}"
+          password: "{{ user_password }}"
+          OrgId: 1
+        status_code: 200
+        validate_certs: false
+      when: user_lookup_check.status == 404
 
     # ------------------------------------------------------------------
     # Ajouter l'utilisateur à la team
     # ------------------------------------------------------------------
 
-    - name: Ensure user is member of team
-      community.grafana.grafana_team:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        name: "{{ team_name }}"
-        email: ""
-        members:
-          - "{{ user_login }}"
-        state: present
+    - name: Lookup user ID (after potential creation)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
         validate_certs: false
+      register: user_info
+
+    - name: Set user_id fact
+      ansible.builtin.set_fact:
+        grafana_user_id: "{{ user_info.json.id }}"
+
+    - name: Check if user is already member of team
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams/{{ grafana_team_id }}/members"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: team_members
+
+    - name: Add user to team (if not already member)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams/{{ grafana_team_id }}/members"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ grafana_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          userId: "{{ grafana_user_id | int }}"
+        status_code: 200
+        validate_certs: false
+      when: >
+        (team_members.json | selectattr('userId', 'equalto', grafana_user_id | int) | list | length) == 0
 
     - name: Display created/updated user info
       ansible.builtin.debug:
