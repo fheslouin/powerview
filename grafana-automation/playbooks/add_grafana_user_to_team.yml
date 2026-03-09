@@ -128,7 +128,7 @@
           email: "{{ user_email }}"
           password: "{{ user_password }}"
           OrgId: 1
-        status_code: 200
+        status_code: [200, 412]
         validate_certs: false
       when: user_lookup_check.status == 404
 
