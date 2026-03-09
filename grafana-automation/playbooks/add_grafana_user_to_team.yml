@@ -383,15 +383,6 @@
     # Permissions : team=Viewer, cet utilisateur=Editor sur son dashboard
     # ------------------------------------------------------------------
 
-    - name: Lookup user ID by login
-      ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
-        method: GET
-        headers: "{{ grafana_auth_headers }}"
-        status_code: 200
-        validate_certs: false
-      register: user_lookup
-
     - name: Set dashboard permissions (team=Viewer, owner=Editor)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/dashboards/uid/{{ campaign_dashboard_uid }}/permissions"
@@ -402,7 +393,7 @@
           items:
             - teamId: "{{ grafana_team_id }}"
               permission: 1
-            - userId: "{{ user_lookup.json.id }}"
+            - userId: "{{ grafana_user_id | int }}"
               permission: 2
         status_code: 200
         validate_certs: false
