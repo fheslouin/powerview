@@ -103,7 +103,7 @@
     # Créer / assurer l'existence de l'utilisateur via API REST
     # ------------------------------------------------------------------
 
-    - name: Check if Grafana user already exists
+    - name: Lookup user by login
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
         method: GET
@@ -112,9 +112,21 @@
         force_basic_auth: true
         status_code: [200, 404]
         validate_certs: false
-      register: user_lookup_check
+      register: user_by_login
 
-    - name: Create Grafana user (if not exists)
+    - name: Lookup user by email (si login introuvable)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_email }}"
+        method: GET
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: [200, 404]
+        validate_certs: false
+      register: user_by_email
+      when: user_by_login.status == 404
+
+    - name: Create Grafana user (si ni login ni email n'existent)
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/admin/users"
         method: POST
@@ -128,15 +140,12 @@
           email: "{{ user_email }}"
           password: "{{ user_password }}"
           OrgId: 1
-        status_code: [200, 412]
+        status_code: 200
         validate_certs: false
-      when: user_lookup_check.status == 404
+      when: user_by_login.status == 404 and user_by_email.status == 404
+      register: user_created
 
-    # ------------------------------------------------------------------
-    # Ajouter l'utilisateur à la team
-    # ------------------------------------------------------------------
-
-    - name: Lookup user ID (after potential creation)
+    - name: Lookup newly created user by login
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ user_login }}"
         method: GET
@@ -145,11 +154,27 @@
         force_basic_auth: true
         status_code: 200
         validate_certs: false
-      register: user_info
+      register: user_after_create
+      when: user_by_login.status == 404 and user_by_email.status == 404
 
-    - name: Set user_id fact
+    - name: Set grafana_user_id (trouvé par login)
       ansible.builtin.set_fact:
-        grafana_user_id: "{{ user_info.json.id }}"
+        grafana_user_id: "{{ user_by_login.json.id }}"
+      when: user_by_login.status == 200
+
+    - name: Set grafana_user_id (trouvé par email)
+      ansible.builtin.set_fact:
+        grafana_user_id: "{{ user_by_email.json.id }}"
+      when: user_by_login.status == 404 and user_by_email.status == 200
+
+    - name: Set grafana_user_id (utilisateur créé)
+      ansible.builtin.set_fact:
+        grafana_user_id: "{{ user_after_create.json.id }}"
+      when: user_by_login.status == 404 and (user_by_email.status | default(404)) == 404
+
+    # ------------------------------------------------------------------
+    # Ajouter l'utilisateur à la team
+    # ------------------------------------------------------------------
 
     - name: Check if user is already member of team
       ansible.builtin.uri:
