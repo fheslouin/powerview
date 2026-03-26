@@ -27,16 +27,28 @@ Prérequis côté CLI Influx :
 
 import argparse
 import json
+import logging
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Optional, Union, List, Dict, Any
 
 from dotenv import load_dotenv
 
 # Charge les variables d'environnement depuis .env (si présent)
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# Niveaux de downsampling créés pour chaque bucket client.
+# Ordre croissant d'agrégation : 1h → 1d → 1w.
+DOWNSAMPLE_LEVELS = [
+    {"suffix": "1h", "every": "1h", "offset": "5m"},
+    {"suffix": "1d", "every": "1d", "offset": "1h"},
+    {"suffix": "1w", "every": "1w", "offset": "2h"},
+]
 
 
 # ---------------------------------------------------------------------------
@@ -213,18 +225,30 @@ def find_bucket_id_cli(bucket_name: str, org: str) -> str:
     return bucket_id
 
 
-def find_existing_token_for_bucket_cli(bucket_name: str, org: str) -> Optional[str]:
+def delete_auth_cli(auth_id: str, org: str) -> None:
+    """Supprime une authorization InfluxDB par son ID."""
+    _run_influx_cmd(["auth", "delete", "--id", auth_id, "--org", org])
+
+
+def find_existing_token_for_bucket_cli(
+    bucket_name: str,
+    org: str,
+    required_bucket_ids: List[str],
+) -> Optional[str]:
     """
     Cherche une authorization existante pour ce bucket, identifiée par sa description.
 
     Description utilisée :
         powerview_token_for_bucket_<bucket_name>
 
+    Vérifie que le token couvre bien tous les required_bucket_ids en lecture.
+    Si le token existe mais est périmé (ne couvre pas tous les buckets), il est supprimé.
+
     Gère les deux formats possibles :
       - {"authorizations": [ {...}, ... ]}
       - [ {...}, ... ]
 
-    Retourne le token si trouvé, sinon None.
+    Retourne le token si trouvé et valide, sinon None.
     """
     description = f"powerview_token_for_bucket_{bucket_name}"
     data = _run_influx_cmd(["auth", "list", "--org", org])
@@ -243,14 +267,47 @@ def find_existing_token_for_bucket_cli(bucket_name: str, org: str) -> Optional[s
     for a in auths:
         if not isinstance(a, dict):
             continue
-        if a.get("description") == description and a.get("token"):
+        if a.get("description") != description or not a.get("token"):
+            continue
+
+        # Vérifie que le token couvre tous les buckets requis en lecture
+        permissions = a.get("permissions") or []
+        read_ids = {
+            p.get("resource", {}).get("id")
+            for p in permissions
+            if isinstance(p, dict)
+            and p.get("action") == "read"
+            and p.get("resource", {}).get("type") == "buckets"
+        }
+        if all(bid in read_ids for bid in required_bucket_ids):
             return a["token"]
+
+        # Token périmé (ne couvre pas les nouveaux buckets) → supprimer
+        auth_id = a.get("id", "")
+        print(
+            f"[manage_influx_tokens] Token périmé pour '{bucket_name}' (manque des buckets DS). Suppression...",
+            file=sys.stderr,
+        )
+        if auth_id:
+            try:
+                delete_auth_cli(auth_id, org)
+            except RuntimeError as e:
+                print(f"[manage_influx_tokens] Avertissement: impossible de supprimer le token: {e}", file=sys.stderr)
+        return None
+
     return None
 
 
-def create_token_for_bucket_cli(bucket_id: str, bucket_name: str, org: str) -> str:
+def create_token_for_bucket_cli(
+    raw_bucket_id: str,
+    bucket_name: str,
+    org: str,
+    extra_read_bucket_ids: Optional[List[str]] = None,
+) -> str:
     """
-    Crée un token avec read/write sur le bucket donné, via la CLI `influx auth create`.
+    Crée un token InfluxDB via `influx auth create` :
+      - READ+WRITE sur raw_bucket_id (bucket principal)
+      - READ sur chaque ID dans extra_read_bucket_ids (buckets downsamplings)
 
     Description :
         powerview_token_for_bucket_<bucket_name>
@@ -258,13 +315,17 @@ def create_token_for_bucket_cli(bucket_id: str, bucket_name: str, org: str) -> s
     Retourne la valeur du token.
     """
     description = f"powerview_token_for_bucket_{bucket_name}"
-    data = _run_influx_cmd([
+    args = [
         "auth", "create",
         "--org", org,
         "--description", description,
-        "--read-bucket", bucket_id,
-        "--write-bucket", bucket_id,
-    ])
+        "--read-bucket", raw_bucket_id,
+        "--write-bucket", raw_bucket_id,
+    ]
+    for bid in (extra_read_bucket_ids or []):
+        args += ["--read-bucket", bid]
+
+    data = _run_influx_cmd(args)
 
     # Selon la version, la sortie peut être un dict ou une liste avec un seul élément
     if isinstance(data, list):
@@ -286,6 +347,89 @@ def create_token_for_bucket_cli(bucket_id: str, bucket_name: str, org: str) -> s
             f"(réponse: {data})"
         )
     return token
+
+
+# ---------------------------------------------------------------------------
+# Downsampling : buckets + tasks
+# ---------------------------------------------------------------------------
+
+def ensure_downsampled_buckets_cli(bucket_name: str, org: str) -> Dict[str, str]:
+    """
+    Crée les buckets de downsampling s'ils n'existent pas.
+
+    Retourne un dict { suffix → bucket_id } pour les 3 niveaux.
+    """
+    ids: Dict[str, str] = {}
+    for level in DOWNSAMPLE_LEVELS:
+        ds_bucket = f"{bucket_name}_{level['suffix']}"
+        bucket_id = find_bucket_id_cli(ds_bucket, org)
+        ids[level["suffix"]] = bucket_id
+        print(
+            f"[manage_influx_tokens] Bucket DS '{ds_bucket}' → id={bucket_id}",
+            file=sys.stderr,
+        )
+    return ids
+
+
+def ensure_downsample_tasks_cli(bucket_name: str, org: str) -> None:
+    """
+    Crée les InfluxDB Tasks de downsampling si elles n'existent pas encore.
+    Utilise le token admin courant (INFLUX_TOKEN) — les tasks sont exécutées
+    avec les permissions admin.
+    """
+    # Récupère la liste des tasks existantes pour filtrer par nom
+    try:
+        data = _run_influx_cmd(["task", "list", "--org", org])
+    except RuntimeError as e:
+        print(
+            f"[manage_influx_tokens] Impossible de lister les tasks InfluxDB: {e}",
+            file=sys.stderr,
+        )
+        return
+
+    existing_tasks: List[Dict[str, Any]] = data if isinstance(data, list) else (data.get("tasks") or [])
+    existing_names = {t.get("name") for t in existing_tasks if isinstance(t, dict)}
+
+    for level in DOWNSAMPLE_LEVELS:
+        task_name = f"downsample_{bucket_name}_{level['suffix']}"
+        if task_name in existing_names:
+            print(
+                f"[manage_influx_tokens] Task '{task_name}' existe déjà, skip.",
+                file=sys.stderr,
+            )
+            continue
+
+        ds_bucket = f"{bucket_name}_{level['suffix']}"
+        flux = (
+            f'option task = {{name: "{task_name}", every: {level["every"]}, offset: {level["offset"]}}}\n\n'
+            f'from(bucket: "{bucket_name}")\n'
+            f'  |> range(start: -task.every)\n'
+            f'  |> filter(fn: (r) => r._measurement == "electrical")\n'
+            f'  |> aggregateWindow(every: {level["every"]}, fn: mean, createEmpty: false)\n'
+            f'  |> to(bucket: "{ds_bucket}", org: "{org}")\n'
+        )
+
+        tmp_path: Optional[str] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".flux", delete=False, prefix=f"pv_task_{task_name}_"
+            ) as f:
+                f.write(flux)
+                tmp_path = f.name
+
+            _run_influx_cmd(["task", "create", "--org", org, "--file", tmp_path])
+            print(
+                f"[manage_influx_tokens] Task '{task_name}' créée.",
+                file=sys.stderr,
+            )
+        except RuntimeError as e:
+            print(
+                f"[manage_influx_tokens] Erreur création task '{task_name}': {e}",
+                file=sys.stderr,
+            )
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -318,18 +462,29 @@ def main() -> None:
         # 2) Prépare l'environnement pour la CLI (INFLUX_HOST / INFLUX_TOKEN)
         _prepare_influx_env()
 
-        # 3) Trouver (ou créer) l'ID du bucket via la CLI
-        bucket_id = find_bucket_id_cli(bucket_name, org)
+        # 3) Trouver (ou créer) le bucket principal
+        raw_bucket_id = find_bucket_id_cli(bucket_name, org)
 
-        # 4) Voir si un token existe déjà pour ce bucket
-        existing = find_existing_token_for_bucket_cli(bucket_name, org)
+        # 4) Créer les buckets de downsampling si absents (idempotent)
+        ds_ids = ensure_downsampled_buckets_cli(bucket_name, org)
+        all_read_ids = [raw_bucket_id] + list(ds_ids.values())
+
+        # 5) Voir si un token valide existe déjà (couvrant les 4 buckets)
+        existing = find_existing_token_for_bucket_cli(bucket_name, org, all_read_ids)
         if existing:
             # IMPORTANT : on n'affiche QUE le token, sans texte autour
             print(existing)
+            # Tâches de downsampling (idempotent même si le token était déjà OK)
+            ensure_downsample_tasks_cli(bucket_name, org)
             return
 
-        # 5) Sinon, créer un nouveau token
-        token = create_token_for_bucket_cli(bucket_id, bucket_name, org)
+        # 6) Sinon, créer un nouveau token couvrant raw + downsampling
+        extra_read_ids = list(ds_ids.values())
+        token = create_token_for_bucket_cli(raw_bucket_id, bucket_name, org, extra_read_ids)
+
+        # 7) Créer les tasks InfluxDB de downsampling (idempotent)
+        ensure_downsample_tasks_cli(bucket_name, org)
+
         # IMPORTANT : on n'affiche QUE le token, sans texte autour
         print(token)
 
