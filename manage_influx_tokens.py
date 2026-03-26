@@ -225,9 +225,9 @@ def find_bucket_id_cli(bucket_name: str, org: str) -> str:
     return bucket_id
 
 
-def delete_auth_cli(auth_id: str, org: str) -> None:
+def delete_auth_cli(auth_id: str, org: str) -> None:  # noqa: ARG001
     """Supprime une authorization InfluxDB par son ID."""
-    _run_influx_cmd(["auth", "delete", "--id", auth_id, "--org", org])
+    _run_influx_cmd(["auth", "delete", "--id", auth_id])
 
 
 def find_existing_token_for_bucket_cli(
