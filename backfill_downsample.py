@@ -30,6 +30,7 @@ from typing import List, Tuple
 
 import influxdb_client
 from dotenv import load_dotenv
+from influx_utils import create_bucket_if_not_exists
 
 load_dotenv()
 
@@ -108,9 +109,8 @@ def backfill_level(
         label = f"[{i}/{len(chunks)}] {_flux_ts(cs)} → {_flux_ts(ce)}"
 
         if dry_run:
-            logger.info("DRY-RUN %s\n%s", label, flux)
             if i == 1:
-                # Affiche uniquement la première tranche pour ne pas noyer la sortie
+                logger.info("DRY-RUN %s\n%s", label, flux)
                 logger.info("(dry-run : seule la 1ère tranche est affichée par niveau)")
             continue
 
@@ -176,6 +176,14 @@ def main() -> None:
         "1d": "1d",
         "1w": "1w",
     }
+
+    # Crée les buckets DS manquants (idempotent)
+    for suffix in args.levels:
+        ds_bucket = f"{args.bucket}_{suffix}"
+        if not args.dry_run:
+            create_bucket_if_not_exists(client, ds_bucket, org)
+        else:
+            logger.info("DRY-RUN : bucket cible '%s' (non créé)", ds_bucket)
 
     total_t0 = time.monotonic()
     for suffix in args.levels:
