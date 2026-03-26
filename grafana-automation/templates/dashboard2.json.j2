@@ -1,0 +1,317 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 144,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "influxdb-adecwatts-datasource",
+        "uid": "{{ datasource_uid }}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": true,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepBefore",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "noValue": "No value",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "range"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb-adecwatts-datasource",
+            "uid": "{{ datasource_uid }}"
+          },
+          "query": "// powerview_config=${config}\nfrom(bucket:\"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) => r._measurement == \"electrical\" )\n|> filter(fn: (r) => r.campaign == \"${campaign}\")\n|> filter(fn: (r) => r.channel in [\"__visible\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Puissances actives appelées (en W)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb-adecwatts-datasource",
+        "uid": "{{ datasource_uid }}"
+      },
+      "description": "Exclut les énergies négatives. Interpolation en cas de données manquantes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "noValue": "No value",
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "id": 4,
+      "options": {
+        "displayLabels": [
+          "percent",
+          "value",
+          "name"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Percent",
+          "sortDesc": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "sort": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "{{ datasource_uid }}"
+          },
+          "query": "// powerview_config=${config}\nfrom(bucket: \"{{ company_name }}\")\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n|> filter(fn: (r) =>\n  r._measurement == \"electrical\" and\n  r.channel_unit == \"W\" and\n  r.campaign == \"$campaign\" and\n  r.channel in [\"__visible_energy_mean\"]\n)\n",
+          "refId": "A"
+        }
+      ],
+      "title": "Energie sur la période",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 3,
+      "panels": [],
+      "title": "Settings",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb-adecwatts-datasource",
+        "uid": "{{ datasource_uid }}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 19,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 2,
+      "options": {
+        "forcedBucket": "{{ company_name }}",
+        "forcedClientId": "{{ datasource_client_id }}",
+        "forcedDatasourceId": {{ datasource_id }},
+        "forcedMeasurement": "electrical"
+      },
+      "pluginVersion": "0.0.1",
+      "targets": [
+        {
+          "refId": "A"
+        }
+      ],
+      "title": "Configuration des voies",
+      "type": "adecwatts-series-config-panel"
+    }
+  ],
+  "preload": false,
+  "schemaVersion": 42,
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "campagne_test",
+          "value": "campagne_test"
+        },
+        "datasource": {
+          "type": "influxdb-adecwatts-datasource",
+          "uid": "{{ datasource_uid }}"
+        },
+        "definition": "from( bucket:\"{{ company_name }}\")\n|>  range(start: 0)\n|> filter(fn: (r) => r._measurement == \"electrical\")\n|> keep(columns: [\"campaign\"])\n|> group()\n|> distinct(column: \"campaign\")\n|> sort(columns: [\"campaign\"])",
+        "label": "Campagne",
+        "name": "campaign",
+        "options": [],
+        "query": {
+          "query": "from( bucket:\"{{ company_name }}\")\n|>  range(start: 0)\n|> filter(fn: (r) => r._measurement == \"electrical\")\n|> keep(columns: [\"campaign\"])\n|> group()\n|> distinct(column: \"campaign\")\n|> sort(columns: [\"campaign\"])"
+        },
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "datasource": {
+          "type": "marcusolsson-json-datasource",
+          "uid": "PA7B9E713AA879D53"
+        },
+        "definition": "",
+        "label": "Config",
+        "name": "config",
+        "options": [],
+        "query": {
+          "cacheDurationSeconds": 300,
+          "fields": [
+            {
+              "jsonPath": "$.*"
+            }
+          ],
+          "method": "GET",
+          "queryParams": "",
+          "urlPath": "/clients/{{ datasource_client_id }}/series-config/configs?campaign=${campaign}"
+        },
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Overview {{ company_name }}",
+  "uid": "powerview_{{ company_name }}",
+  "version": 6
+}
