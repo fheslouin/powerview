@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
 
+import requests
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
@@ -70,6 +71,61 @@ def setup_logging() -> None:
 # ---------------------------------------------------------------------------
 # Traitement d'un fichier
 # ---------------------------------------------------------------------------
+
+def _publish_channels_to_config_api(
+    client_id: str,
+    campaign: str,
+    channel_stats: Dict[str, Dict[str, Any]],
+) -> None:
+    """
+    Publie la liste des voies (field keys) détectées dans ce TSV vers le
+    config API, qui les persiste en SQLite.
+
+    Le panel Grafana lookup ensuite ce catalogue au lieu de scanner Influx
+    (évite les timeouts sur les buckets à forte cardinalité).
+
+    No-op si `CONFIG_API_URL` n'est pas défini. Échec silencieux (warning)
+    en cas d'erreur HTTP — l'ingestion reste le use case primaire.
+    """
+    api_url = os.getenv("CONFIG_API_URL", "").rstrip("/")
+    if not api_url:
+        logger.debug("CONFIG_API_URL non défini, skip publication des voies au config API")
+        return
+
+    channels_payload = []
+    for cid, stats in channel_stats.items():
+        unit = stats.get("channel_unit") or ""
+        if not cid or not unit:
+            continue
+        field_id = f"{cid}_{unit}"
+        channels_payload.append({
+            "fieldId": field_id,
+            "channelId": cid,
+            "channelUnit": unit,
+            "channelLabel": stats.get("channel_label"),
+            "deviceMasterSn": stats.get("device_master_sn"),
+        })
+
+    if not channels_payload:
+        return
+
+    try:
+        resp = requests.post(
+            f"{api_url}/clients/{client_id}/channels",
+            json={"campaign": campaign or "", "channels": channels_payload},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        logger.info(
+            "  Publiés %d voies au config API pour (%s, %s)",
+            len(channels_payload), client_id, campaign,
+        )
+    except Exception as e:
+        logger.warning(
+            "Échec publication voies au config API pour (%s, %s): %s",
+            client_id, campaign, e,
+        )
+
 
 def _compute_time_range_from_tsv(tsv_file: str) -> Tuple[str, str]:
     """
@@ -245,6 +301,14 @@ def process_tsv_file(
 
         except Exception as e:
             logger.warning("Impossible de vérifier les points dans InfluxDB pour %s: %s", tsv_file, e)
+
+        # Publie le catalogue des voies au config API (utilisé par le panel
+        # Grafana pour peupler la config sans scanner Influx).
+        _publish_channels_to_config_api(
+            client_id=bucket_name,
+            campaign=campaign_name,
+            channel_stats=file_report.get("channels") or {},
+        )
 
         file_report["status"] = "success"
         return True, file_report
