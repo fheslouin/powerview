@@ -173,24 +173,11 @@ schema.tagValues(
     ]
 
 
-def _resolve_config_client_id(bucket: str) -> str:
-    """
-    Convention Ansible (`create_grafana_resources.yml`) :
-        forcedClientId = "{company_name}_{user_login}"
-    où `user_login` défaute à `company_name`. Donc pour un bucket `<x>`,
-    le clientId configuré côté Grafana datasource est `<x>_<x>`.
-
-    Override via env CONFIG_API_CLIENT_ID_FORMAT si l'Ansible a été lancé
-    avec company_user_login_override (ex. "{bucket}" ou "{bucket}_alice").
-    """
-    fmt = os.getenv("CONFIG_API_CLIENT_ID_FORMAT", "{bucket}_{bucket}")
-    return fmt.format(bucket=bucket)
-
-
 def _publish_channels(
-    api_url: str, client_id: str, campaign: str, channels: List[Dict[str, str]]
+    api_url: str, bucket: str, campaign: str, channels: List[Dict[str, str]]
 ) -> None:
-    url = f"{api_url.rstrip('/')}/clients/{client_id}/channels"
+    """POST vers /buckets/{bucket}/channels (scope bucket, pas clientId)."""
+    url = f"{api_url.rstrip('/')}/buckets/{bucket}/channels"
     resp = requests.post(
         url,
         json={"campaign": campaign, "channels": channels},
@@ -239,11 +226,10 @@ def backfill_bucket(
         if not rows:
             continue
 
-        client_id = _resolve_config_client_id(bucket)
         try:
-            _publish_channels(api_url, client_id, camp, rows)
+            _publish_channels(api_url, bucket, camp, rows)
         except Exception as e:
-            logger.error("  Échec publish %s (clientId=%s)/%s : %s", bucket, client_id, camp, e)
+            logger.error("  Échec publish %s/%s : %s", bucket, camp, e)
 
 
 def main() -> int:

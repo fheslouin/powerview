@@ -72,28 +72,17 @@ def setup_logging() -> None:
 # Traitement d'un fichier
 # ---------------------------------------------------------------------------
 
-def _resolve_config_client_id(bucket_name: str) -> str:
-    """
-    Convention Ansible (`create_grafana_resources.yml`) :
-        forcedClientId = "{company_name}_{user_login}"
-    où `user_login` défaute à `company_name`. Donc pour un bucket `<x>`,
-    le clientId configuré côté Grafana datasource est `<x>_<x>` par défaut.
-
-    Surcharge possible via env CONFIG_API_CLIENT_ID_FORMAT (ex. "{bucket}")
-    si l'Ansible a été lancé avec company_user_login_override.
-    """
-    fmt = os.getenv("CONFIG_API_CLIENT_ID_FORMAT", "{bucket}_{bucket}")
-    return fmt.format(bucket=bucket_name)
-
-
 def _publish_channels_to_config_api(
-    client_id: str,
+    bucket: str,
     campaign: str,
     channel_stats: Dict[str, Dict[str, Any]],
 ) -> None:
     """
     Publie la liste des voies (field keys) détectées dans ce TSV vers le
     config API, qui les persiste en SQLite.
+
+    Scope BUCKET (= company_name Influx) : les voies sont universelles pour
+    tous les users d'une même company, seules les configs sont scopées user.
 
     Le panel Grafana lookup ensuite ce catalogue au lieu de scanner Influx
     (évite les timeouts sur les buckets à forte cardinalité).
@@ -125,19 +114,19 @@ def _publish_channels_to_config_api(
 
     try:
         resp = requests.post(
-            f"{api_url}/clients/{client_id}/channels",
+            f"{api_url}/buckets/{bucket}/channels",
             json={"campaign": campaign or "", "channels": channels_payload},
             timeout=10,
         )
         resp.raise_for_status()
         logger.info(
             "  Publiés %d voies au config API pour (%s, %s)",
-            len(channels_payload), client_id, campaign,
+            len(channels_payload), bucket, campaign,
         )
     except Exception as e:
         logger.warning(
             "Échec publication voies au config API pour (%s, %s): %s",
-            client_id, campaign, e,
+            bucket, campaign, e,
         )
 
 
@@ -317,9 +306,10 @@ def process_tsv_file(
             logger.warning("Impossible de vérifier les points dans InfluxDB pour %s: %s", tsv_file, e)
 
         # Publie le catalogue des voies au config API (utilisé par le panel
-        # Grafana pour peupler la config sans scanner Influx).
+        # Grafana pour peupler la config sans scanner Influx). Scope bucket :
+        # les voies sont universelles pour tous les users d'une company.
         _publish_channels_to_config_api(
-            client_id=_resolve_config_client_id(bucket_name),
+            bucket=bucket_name,
             campaign=campaign_name,
             channel_stats=file_report.get("channels") or {},
         )
