@@ -72,6 +72,20 @@ def setup_logging() -> None:
 # Traitement d'un fichier
 # ---------------------------------------------------------------------------
 
+def _resolve_config_client_id(bucket_name: str) -> str:
+    """
+    Convention Ansible (`create_grafana_resources.yml`) :
+        forcedClientId = "{company_name}_{user_login}"
+    où `user_login` défaute à `company_name`. Donc pour un bucket `<x>`,
+    le clientId configuré côté Grafana datasource est `<x>_<x>` par défaut.
+
+    Surcharge possible via env CONFIG_API_CLIENT_ID_FORMAT (ex. "{bucket}")
+    si l'Ansible a été lancé avec company_user_login_override.
+    """
+    fmt = os.getenv("CONFIG_API_CLIENT_ID_FORMAT", "{bucket}_{bucket}")
+    return fmt.format(bucket=bucket_name)
+
+
 def _publish_channels_to_config_api(
     client_id: str,
     campaign: str,
@@ -305,7 +319,7 @@ def process_tsv_file(
         # Publie le catalogue des voies au config API (utilisé par le panel
         # Grafana pour peupler la config sans scanner Influx).
         _publish_channels_to_config_api(
-            client_id=bucket_name,
+            client_id=_resolve_config_client_id(bucket_name),
             campaign=campaign_name,
             channel_stats=file_report.get("channels") or {},
         )
