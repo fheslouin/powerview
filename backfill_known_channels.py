@@ -61,10 +61,21 @@ def _get_env(name: str) -> str:
 def _list_client_buckets(client: InfluxDBClient) -> List[str]:
     """
     Liste les buckets clients (raw), en filtrant les buckets système et les downsamplés.
+    L'API Influx limite `find_buckets` à 100 par page : on pagine via `after`.
     """
     api = client.buckets_api()
-    all_buckets = api.find_buckets(limit=1000).buckets or []
-    names = [b.name for b in all_buckets]
+    names: List[str] = []
+    after: str = ""
+    while True:
+        page = api.find_buckets(limit=100, after=after) if after else api.find_buckets(limit=100)
+        buckets = page.buckets or []
+        if not buckets:
+            break
+        names.extend(b.name for b in buckets)
+        # Pagination cursor-based via `after` sur l'id du dernier bucket
+        after = buckets[-1].id
+        if len(buckets) < 100:
+            break
 
     return sorted(
         n for n in names
