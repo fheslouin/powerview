@@ -97,51 +97,69 @@ schema.tagValues(
     return sorted(values)
 
 
+def _parse_field_id(field_id: str) -> Dict[str, str]:
+    """
+    Field name convention : `<channel_id>_<unit>` (ex. "M02000835_Ch1_W").
+    L'unité est le dernier segment après `_`. Le reste est le channel_id.
+    """
+    if "_" not in field_id:
+        return {"channelId": None, "channelUnit": None}
+    channel_id, _, unit = field_id.rpartition("_")
+    return {"channelId": channel_id or None, "channelUnit": unit or None}
+
+
 def _scan_fields_for_campaign(
     client: InfluxDBClient, org: str, bucket: str, campaign: str
 ) -> List[Dict[str, str]]:
     """
-    Récupère la liste des voies pour (bucket, campaign) en lisant 1 point par série
-    dans `<bucket>_1w` (volume minimal) avec les tags channel_id/unit/label/device.
+    Liste les field keys pour (bucket, campaign) via schema.tagValues sur `_field`
+    (utilise l'index TSI d'Influx). Lent sur gros buckets (~1min) mais seule voie
+    fiable quand la cardinalité explose côté points.
 
-    Si `_1w` est vide (pas encore downsamplé), fallback sur le bucket raw limité à -7d.
+    Essaie d'abord `<bucket>_1w` (index plus léger), fallback sur raw.
+    Les tags channel_id/unit sont inférés depuis le nom du field
+    (convention : `<channel_id>_<unit>`). Les métadonnées optionnelles
+    (channel_label, device_master_sn) ne sont pas récupérées ici.
     """
-    def _run(bucket_name: str, range_start: str) -> List[Dict[str, str]]:
+    def _run(bucket_name: str) -> List[str]:
         flux = f'''
-from(bucket: "{bucket_name}")
-  |> range(start: {range_start})
-  |> filter(fn: (r) => r._measurement == "electrical" and r.campaign == "{campaign}")
-  |> first()
-  |> keep(columns: ["_field", "channel_id", "channel_unit", "channel_label", "device_master_sn"])
+import "influxdata/influxdb/schema"
+schema.tagValues(
+  bucket: "{bucket_name}",
+  tag: "_field",
+  predicate: (r) => r._measurement == "electrical" and r.campaign == "{campaign}",
+  start: 0
+)
 '''
         tables = client.query_api().query(query=flux, org=org)
-        seen: Dict[str, Dict[str, str]] = {}
+        values: Set[str] = set()
         for t in tables:
             for rec in t.records:
-                field_id = rec.values.get("_field")
-                if not field_id:
-                    continue
-                if field_id in seen:
-                    continue
-                seen[field_id] = {
-                    "fieldId": field_id,
-                    "channelId": rec.values.get("channel_id"),
-                    "channelUnit": rec.values.get("channel_unit"),
-                    "channelLabel": rec.values.get("channel_label"),
-                    "deviceMasterSn": rec.values.get("device_master_sn"),
-                }
-        return list(seen.values())
+                v = rec.get_value()
+                if isinstance(v, str) and v:
+                    values.add(v)
+        return sorted(values)
 
-    # Préférer _1w : 1 pt/semaine, minuscule à scanner.
-    try:
-        rows = _run(f"{bucket}_1w", "0")
-        if rows:
-            return rows
-    except Exception as e:
-        logger.warning("Scan %s_1w échoué (%s), fallback raw -7d", bucket, e)
+    field_ids: List[str] = []
+    for candidate in (f"{bucket}_1w", bucket):
+        try:
+            field_ids = _run(candidate)
+        except Exception as e:
+            logger.warning("Scan %s échoué (%s)", candidate, e)
+            continue
+        if field_ids:
+            logger.info("  fields depuis %s : %d", candidate, len(field_ids))
+            break
 
-    # Fallback : bucket raw sur fenêtre courte pour campagne fraîchement uploadée.
-    return _run(bucket, "-7d")
+    return [
+        {
+            "fieldId": fid,
+            **_parse_field_id(fid),
+            "channelLabel": None,
+            "deviceMasterSn": None,
+        }
+        for fid in field_ids
+    ]
 
 
 def _publish_channels(
@@ -220,7 +238,8 @@ def main() -> int:
     logger.info("Influx : %s (org=%s)", host, org)
     logger.info("Config API : %s  (dry_run=%s)", api_url, args.dry_run)
 
-    with InfluxDBClient(url=host, token=token, org=org) as client:
+    # Timeout généreux : schema.tagValues peut prendre >1min sur gros buckets.
+    with InfluxDBClient(url=host, token=token, org=org, timeout=300_000) as client:
         buckets = [args.bucket] if args.bucket else _list_client_buckets(client)
         logger.info("Buckets à traiter : %s", ", ".join(buckets) if buckets else "(aucun)")
 
