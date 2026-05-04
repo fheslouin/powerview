@@ -178,17 +178,34 @@
       register: company_user
       when: not company_created.stat.exists
 
-    - name: Ajouter l'utilisateur à la team (membre de la team uniquement)
-      community.grafana.grafana_team:
-        url: "{{ grafana_url }}"
-        url_username: "{{ grafana_username }}"
-        url_password: "{{ grafana_password }}"
-        name: "{{ company_name }}"
-        email: "{{ company_user_email }}"
-        members:
-          - "{{ company_user_login }}"
-        state: present
+    - name: Lookup company user ID by login
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ company_user_login }}"
+        method: GET
+        user: "{{ grafana_username }}"
+        password: "{{ grafana_password }}"
+        force_basic_auth: true
+        status_code: 200
         validate_certs: false
+      register: company_user_lookup
+      when: not company_created.stat.exists
+
+    - name: Ajouter l'utilisateur à la team (POST direct, idempotent)
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/teams/{{ grafana_team_id }}/members"
+        method: POST
+        user: "{{ grafana_username }}"
+        password: "{{ grafana_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          userId: "{{ company_user_lookup.json.id }}"
+        status_code: [200, 400]
+        validate_certs: false
+      register: team_member_add
+      failed_when:
+        - team_member_add.status == 400
+        - "'already' not in (team_member_add.json.message | default('') | lower)"
       when: not company_created.stat.exists
 
     # ------------------------------------------------------------------
@@ -436,16 +453,6 @@
     # ------------------------------------------------------------------
     # Permissions via team (créée ou existante)
     # ------------------------------------------------------------------
-
-    - name: Lookup company user ID by login
-      ansible.builtin.uri:
-        url: "{{ grafana_url }}/api/users/lookup?loginOrEmail={{ company_user_login }}"
-        method: GET
-        headers: "{{ grafana_auth_headers }}"
-        status_code: 200
-        validate_certs: false
-      register: company_user_lookup
-      when: not company_created.stat.exists
 
     - name: Set dashboard permissions (team=Viewer, owner=Editor)
       ansible.builtin.uri:
