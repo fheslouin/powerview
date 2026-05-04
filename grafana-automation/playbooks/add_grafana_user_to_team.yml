@@ -189,9 +189,9 @@
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/teams/{{ grafana_team_id }}/members"
         method: POST
-        headers:
-          Authorization: "Bearer {{ grafana_api_token }}"
-          Content-Type: "application/json"
+        url_username: "{{ grafana_username }}"
+        url_password: "{{ grafana_password }}"
+        force_basic_auth: true
         body_format: json
         body:
           userId: "{{ grafana_user_id | int }}"
