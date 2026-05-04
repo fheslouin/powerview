@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple
 import influxdb_client
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client.rest import ApiException
 from dotenv import load_dotenv
 
 # Charge les variables d'environnement (.env)
@@ -44,12 +45,18 @@ def create_bucket_if_not_exists(client: InfluxDBClient, bucket_name: str, org: s
     """
     Crée le bucket InfluxDB s'il n'existe pas.
     """
+    # find_bucket_by_name fait un lookup direct côté serveur (pas de pagination
+    # à gérer, contrairement à find_buckets() qui retourne 20 buckets max par page).
     buckets_api = client.buckets_api()
-    existing_buckets = buckets_api.find_buckets().buckets
-
-    if not any(bucket.name == bucket_name for bucket in existing_buckets):
-        logger.info("Creating bucket: %s", bucket_name)
+    if buckets_api.find_bucket_by_name(bucket_name) is not None:
+        return
+    logger.info("Creating bucket: %s", bucket_name)
+    try:
         buckets_api.create_bucket(bucket_name=bucket_name, org=org)
+    except ApiException as e:
+        if e.status in (409, 422):
+            return
+        raise
 
 
 def write_points(

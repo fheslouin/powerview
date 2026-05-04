@@ -616,6 +616,12 @@ class DummyBucketsAPI:
 
         return Result(self._buckets)
 
+    def find_bucket_by_name(self, bucket_name):
+        for b in self._buckets:
+            if b.name == bucket_name:
+                return b
+        return None
+
     def create_bucket(self, bucket_name, org):
         class Bucket:
             def __init__(self, name):
