@@ -270,15 +270,25 @@ def find_existing_token_for_bucket_cli(
         if a.get("description") != description or not a.get("token"):
             continue
 
-        # Vérifie que le token couvre tous les buckets requis en lecture
+        # Vérifie que le token couvre tous les buckets requis en lecture.
+        # Selon la version de la CLI Influx, chaque permission peut être :
+        #   - un dict : {"action": "read", "resource": {"type": "buckets", "id": "..."}}
+        #   - une string : "read:orgs/<orgid>/buckets/<bucketid>"
         permissions = a.get("permissions") or []
-        read_ids = {
-            p.get("resource", {}).get("id")
-            for p in permissions
-            if isinstance(p, dict)
-            and p.get("action") == "read"
-            and p.get("resource", {}).get("type") == "buckets"
-        }
+        read_ids: set = set()
+        for p in permissions:
+            if isinstance(p, dict):
+                if (
+                    p.get("action") == "read"
+                    and p.get("resource", {}).get("type") == "buckets"
+                ):
+                    bid = p.get("resource", {}).get("id")
+                    if bid:
+                        read_ids.add(bid)
+            elif isinstance(p, str):
+                # format: "<action>:orgs/<orgid>/buckets/<bucketid>"
+                if p.startswith("read:") and "/buckets/" in p:
+                    read_ids.add(p.rsplit("/buckets/", 1)[-1])
         if all(bid in read_ids for bid in required_bucket_ids):
             return a["token"]
 
