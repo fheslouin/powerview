@@ -253,6 +253,56 @@
       ansible.builtin.set_fact:
         influxdb_bucket_token: "{{ bucket_token_cmd.stdout | trim }}"
 
+    # ------------------------------------------------------------------
+    # Refresh token in all existing company datasources
+    # (au cas où manage_influx_tokens.py aurait régénéré le token,
+    # par ex. si un nouveau bucket DS a été ajouté entre-temps)
+    # ------------------------------------------------------------------
+
+    - name: List all Grafana datasources
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources"
+        method: GET
+        headers: "{{ grafana_auth_headers }}"
+        status_code: 200
+        validate_certs: false
+      register: all_datasources
+
+    - name: Filter datasources belonging to this company
+      ansible.builtin.set_fact:
+        company_datasources: >-
+          {{
+            all_datasources.json
+            | selectattr('name', 'match', '^influxdb_' ~ company_name ~ '($|_)')
+            | list
+          }}
+
+    - name: Refresh InfluxDB token in existing company datasources
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/{{ item.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ grafana_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: >-
+          {{
+            item
+            | combine(
+                {
+                  'secureJsonData': {
+                    'httpHeaderValue1': 'Token ' ~ influxdb_bucket_token,
+                    'token': influxdb_bucket_token
+                  }
+                }
+              )
+          }}
+        status_code: 200
+        validate_certs: false
+      loop: "{{ company_datasources }}"
+      loop_control:
+        label: "{{ item.name }} (id={{ item.id }})"
+
     - name: Check if user datasource already exists
       ansible.builtin.uri:
         url: "{{ grafana_url }}/api/datasources/name/influxdb_{{ company_name }}_{{ user_login }}"
