@@ -5,6 +5,15 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.4.3] - 2026-09-03
+
+### Corrigé
+
+- `docker-compose.yml` : le healthcheck InfluxDB (`influx ping -host localhost`)
+  échouait systématiquement (`unsupported protocol scheme`), laissant le
+  conteneur `unhealthy` en permanence — le CLI v2 attend une URL complète
+  (`--host http://localhost:8086`).
+
 ## [0.4.2] - 2026-09-03
 
 ### Corrigé

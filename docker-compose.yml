@@ -33,7 +33,7 @@ services:
       - influxdb2-data:/var/lib/influxdb2
       - influxdb2-config:/etc/influxdb2
     healthcheck:
-      test: ["CMD", "influx", "ping", "-host", "localhost"]
+      test: ["CMD", "influx", "ping", "--host", "http://localhost:8086"]
       interval: 30s
       timeout: 10s
       retries: 5
