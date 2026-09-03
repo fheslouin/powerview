@@ -723,3 +723,160 @@ def test_setup_influxdb_client_missing_env(monkeypatch):
 
     with pytest.raises(ValueError):
         influx_utils.setup_influxdb_client()
+
+
+# ---------------------------------------------------------------------------
+# Tests pour InfluxUnavailableError (fichiers différés, pas déplacés en error/)
+# ---------------------------------------------------------------------------
+
+import urllib3.exceptions
+from influxdb_client.rest import ApiException
+
+from influx_utils import InfluxUnavailableError
+
+
+class FailingWriteClient(DummyClient):
+    """DummyClient dont l'écriture échoue avec l'exception fournie."""
+
+    def __init__(self, exc: Exception):
+        super().__init__()
+        self._exc = exc
+
+    def write_api(self, write_options=None):
+        exc = self._exc
+
+        class FailingWriteAPI:
+            def write(self, bucket, org, record):
+                raise exc
+
+        return FailingWriteAPI()
+
+
+def test_write_points_connection_error_raises_influx_unavailable():
+    """
+    Une erreur de connexion urllib3 pendant write_points doit être requalifiée
+    en InfluxUnavailableError (erreur transitoire d'infra).
+    """
+    client = FailingWriteClient(urllib3.exceptions.ProtocolError("Connection refused"))
+    from influxdb_client import Point
+
+    with pytest.raises(InfluxUnavailableError):
+        influx_utils.write_points(client, "company1", "my-org", [Point("electrical")])
+
+
+def test_write_points_builtin_connection_error_raises_influx_unavailable():
+    """
+    Idem avec une ConnectionError builtin (ex: ConnectionRefusedError).
+    """
+    client = FailingWriteClient(ConnectionRefusedError(111, "Connection refused"))
+    from influxdb_client import Point
+
+    with pytest.raises(InfluxUnavailableError):
+        influx_utils.write_points(client, "company1", "my-org", [Point("electrical")])
+
+
+def test_write_points_api_error_4xx_is_not_requalified():
+    """
+    Une ApiException 4xx (vraie erreur de requête) doit remonter telle quelle,
+    pas en InfluxUnavailableError.
+    """
+    client = FailingWriteClient(ApiException(status=400, reason="Bad Request"))
+    from influxdb_client import Point
+
+    with pytest.raises(ApiException):
+        influx_utils.write_points(client, "company1", "my-org", [Point("electrical")])
+
+
+def test_create_bucket_connection_error_raises_influx_unavailable():
+    """
+    Une erreur de connexion pendant le lookup/création de bucket doit être
+    requalifiée en InfluxUnavailableError.
+    """
+    client = DummyClient()
+
+    def failing_find(bucket_name):
+        raise urllib3.exceptions.ProtocolError("Connection refused")
+
+    client._buckets_api.find_bucket_by_name = failing_find
+
+    with pytest.raises(InfluxUnavailableError):
+        influx_utils.create_bucket_if_not_exists(client, "company1", "my-org")
+
+
+def _make_tsv_tree(tmp_path: Path) -> tuple:
+    """
+    Prépare base_folder/company1/campaign1/02001084/test.tsv et retourne
+    (base_folder, tsv_file).
+    """
+    base_folder = tmp_path / "data"
+    tsv_dir = base_folder / "company1" / "campaign1" / "02001084"
+    tsv_dir.mkdir(parents=True)
+    content = """
+    02001084\t02001084
+    MV_T302_V002\tPh 1 V
+    03/08/25 03:20:00\t242.25
+    """
+    tsv_file = write_tmp_tsv(tsv_dir, content)
+    return base_folder, tsv_file
+
+
+def test_process_tsv_file_influx_unavailable_returns_deferred(tmp_path):
+    """
+    Vérifie que process_tsv_file marque le fichier 'deferred' (et pas 'error')
+    quand InfluxDB est injoignable.
+    """
+    base_folder, tsv_file = _make_tsv_tree(tmp_path)
+    client = FailingWriteClient(ConnectionRefusedError(111, "Connection refused"))
+
+    ok, file_report = tsv_parser.process_tsv_file(
+        str(tsv_file), str(base_folder), client, "my-org"
+    )
+
+    assert ok is False
+    assert file_report["status"] == "deferred"
+    assert "injoignable" in file_report["error"]
+
+
+def test_main_defers_file_when_influx_unavailable(monkeypatch, tmp_path):
+    """
+    Vérifie de bout en bout que main() laisse le fichier EN PLACE (ni parsed/
+    ni error/) quand l'écriture InfluxDB échoue sur une erreur de connexion.
+    """
+    import sys as _sys
+
+    base_folder, tsv_file = _make_tsv_tree(tmp_path)
+    client = FailingWriteClient(ConnectionRefusedError(111, "Connection refused"))
+
+    monkeypatch.setattr(tsv_parser, "setup_influxdb_client", lambda: (client, "my-org"))
+    monkeypatch.setattr(tsv_parser, "ping_influxdb", lambda c: True)
+    monkeypatch.setenv("TSV_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setattr(_sys, "argv", ["tsv_parser.py", "--dataFolder", str(base_folder)])
+
+    tsv_parser.main()
+
+    # Le fichier n'a pas bougé et aucun dossier parsed/ ou error/ n'a été créé
+    assert tsv_file.exists()
+    assert not (tsv_file.parent / "error").exists()
+    assert not (tsv_file.parent / "parsed").exists()
+
+
+def test_main_aborts_without_touching_files_when_ping_fails(monkeypatch, tmp_path):
+    """
+    Vérifie que main() s'arrête (exit 1) sans toucher aux fichiers quand
+    InfluxDB ne répond pas au ping initial.
+    """
+    import sys as _sys
+
+    base_folder, tsv_file = _make_tsv_tree(tmp_path)
+    client = DummyClient()
+
+    monkeypatch.setattr(tsv_parser, "setup_influxdb_client", lambda: (client, "my-org"))
+    monkeypatch.setattr(tsv_parser, "ping_influxdb", lambda c: False)
+    monkeypatch.setattr(_sys, "argv", ["tsv_parser.py", "--dataFolder", str(base_folder)])
+
+    with pytest.raises(SystemExit):
+        tsv_parser.main()
+
+    assert tsv_file.exists()
+    assert not (tsv_file.parent / "error").exists()
+    assert not (tsv_file.parent / "parsed").exists()

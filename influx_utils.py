@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import influxdb_client
+import urllib3.exceptions
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from influxdb_client.rest import ApiException
@@ -14,6 +15,50 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger("tsv_parser")
+
+
+class InfluxUnavailableError(Exception):
+    """
+    InfluxDB est injoignable (erreur réseau, connexion refusée, timeout, 5xx passerelle).
+
+    Erreur transitoire d'infrastructure : le fichier en cours de traitement ne doit
+    PAS être déplacé en error/ (réservé aux fichiers réellement invalides), il doit
+    rester en place pour être rejoué au prochain déclenchement du hook.
+    """
+
+
+# urllib3.exceptions.HTTPError couvre NewConnectionError, MaxRetryError,
+# ReadTimeoutError, ProtocolError... (c'est la base des erreurs transport urllib3,
+# utilisées par influxdb_client).
+_CONNECTION_ERROR_TYPES = (
+    urllib3.exceptions.HTTPError,
+    ConnectionError,
+    TimeoutError,
+)
+
+
+def _raise_if_unavailable(e: BaseException, operation: str) -> None:
+    """
+    Lève InfluxUnavailableError si `e` est une erreur de connexion / indisponibilité
+    transitoire d'InfluxDB ; ne fait rien sinon (l'appelant re-lève l'originale).
+    """
+    transient = isinstance(e, _CONNECTION_ERROR_TYPES) or (
+        isinstance(e, ApiException) and e.status in (502, 503, 504)
+    )
+    if transient:
+        raise InfluxUnavailableError(
+            f"InfluxDB injoignable pendant '{operation}': {e}"
+        ) from e
+
+
+def ping_influxdb(client: InfluxDBClient) -> bool:
+    """
+    Vérifie qu'InfluxDB répond. Retourne False sur toute erreur.
+    """
+    try:
+        return bool(client.ping())
+    except Exception:
+        return False
 
 
 def setup_influxdb_client() -> Tuple[InfluxDBClient, str]:
@@ -48,14 +93,18 @@ def create_bucket_if_not_exists(client: InfluxDBClient, bucket_name: str, org: s
     # find_bucket_by_name fait un lookup direct côté serveur (pas de pagination
     # à gérer, contrairement à find_buckets() qui retourne 20 buckets max par page).
     buckets_api = client.buckets_api()
-    if buckets_api.find_bucket_by_name(bucket_name) is not None:
-        return
-    logger.info("Creating bucket: %s", bucket_name)
     try:
+        if buckets_api.find_bucket_by_name(bucket_name) is not None:
+            return
+        logger.info("Creating bucket: %s", bucket_name)
         buckets_api.create_bucket(bucket_name=bucket_name, org=org)
     except ApiException as e:
         if e.status in (409, 422):
             return
+        _raise_if_unavailable(e, f"create_bucket({bucket_name})")
+        raise
+    except Exception as e:
+        _raise_if_unavailable(e, f"create_bucket({bucket_name})")
         raise
 
 
@@ -71,7 +120,11 @@ def write_points(
     if not points:
         return
     write_api = client.write_api(write_options=SYNCHRONOUS)
-    write_api.write(bucket=bucket_name, org=org, record=points)
+    try:
+        write_api.write(bucket=bucket_name, org=org, record=points)
+    except Exception as e:
+        _raise_if_unavailable(e, f"write_points(bucket={bucket_name})")
+        raise
     # Message conservé dans les logs
     logger.info("  ✓ Successfully written to InfluxDB")
     # Et également sur stdout pour compatibilité avec les tests existants
@@ -102,6 +155,7 @@ def write_run_summary_to_influx(
             .field("nb_files_total", report.get("nb_files_total", 0))
             .field("nb_files_success", report.get("nb_files_success", 0))
             .field("nb_files_failed", report.get("nb_files_failed", 0))
+            .field("nb_files_deferred", report.get("nb_files_deferred", 0))
             .field("nb_points_total", report.get("nb_points_total", 0))
             .field("duration_s", report.get("duration_s", 0.0))
             .field("base_folder", str(report.get("base_folder", "")))

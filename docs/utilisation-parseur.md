@@ -394,8 +394,17 @@ le JSON du header parsé.
 
 - même logique, mais vers un sous‑dossier `error/`.
 
-Ces fonctions sont appelées par `tsv_parser.process_tsv_file` en fonction du
-succès ou de l’échec du parsing/écriture.
+Ces fonctions sont appelées par `tsv_parser.main` en fonction du statut retourné
+par `process_tsv_file` :
+
+- `success` → `parsed/` ;
+- `error` (fichier invalide : structure, parsing…) → `error/` ;
+- `deferred` (InfluxDB injoignable : `InfluxUnavailableError` levée par
+  `influx_utils` sur erreur de connexion/timeout/5xx passerelle) → **le fichier
+  reste en place** et sera rejoué au prochain déclenchement du hook.
+
+Par ailleurs, `main` effectue un `ping()` InfluxDB avant tout traitement : si le
+serveur ne répond pas, le run s’arrête (exit 1) sans déplacer aucun fichier.
 
 ### 5.8 Rapport JSON sur disque
 
@@ -448,7 +457,8 @@ Le script `on-upload.sh` est appelé par SFTPGo avec différentes valeurs de
 3. `tsv_parser.py` :
    - parse le fichier (V002 ou V003) ;
    - écrit les points dans InfluxDB (bucket = client, measurement = `electrical`) ;
-   - déplace le fichier dans `parsed/` ou `error/` ;
+   - déplace le fichier dans `parsed/` ou `error/` (ou le laisse en place si
+     InfluxDB est injoignable, pour rejeu au prochain hook) ;
    - écrit un rapport JSON ;
    - écrit un résumé d’exécution dans le bucket meta.
 

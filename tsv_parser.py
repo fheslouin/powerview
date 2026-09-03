@@ -26,11 +26,13 @@ from fs_utils import (
     move_error_file,
 )
 from influx_utils import (
+    InfluxUnavailableError,
     setup_influxdb_client,
     create_bucket_if_not_exists,
     write_points,
     write_run_summary_to_influx,
     count_points_for_file,
+    ping_influxdb,
 )
 
 # Load environment variables from .env file
@@ -317,6 +319,15 @@ def process_tsv_file(
         file_report["status"] = "success"
         return True, file_report
 
+    except InfluxUnavailableError as e:
+        # Panne d'infra transitoire, pas un fichier invalide : on marque le fichier
+        # "deferred" pour qu'il reste en place et soit rejoué au prochain run.
+        msg = str(e)
+        logger.error("  ✗ InfluxDB indisponible, fichier laissé en place pour rejeu: %s (%s)", tsv_file, msg)
+        file_report["status"] = "deferred"
+        file_report["error"] = msg
+        return False, file_report
+
     except Exception as e:
         msg = str(e)
         logger.error("  ✗ Error processing %s: %s", tsv_file, msg)
@@ -420,6 +431,15 @@ def main():
         except Exception as e:
             logger.error("Error connecting to InfluxDB: %s", e)
             sys.exit(1)
+
+        # Garde-fou : si InfluxDB ne répond pas, on s'arrête sans toucher aux
+        # fichiers (ni parsed/ ni error/) — ils seront rejoués au prochain run.
+        if not ping_influxdb(client):
+            logger.error(
+                "InfluxDB ne répond pas au ping (%s) — aucun fichier ne sera traité ni déplacé.",
+                os.getenv("INFLUXDB_HOST"),
+            )
+            sys.exit(1)
     else:
         logger.info("Mode DRY-RUN : aucune connexion à InfluxDB ne sera effectuée.")
 
@@ -435,6 +455,7 @@ def main():
         "nb_files_total": len(tsv_files),
         "nb_files_success": 0,
         "nb_files_failed": 0,
+        "nb_files_deferred": 0,
         "nb_points_total": 0,
         "status": "success",
         "files": [],
@@ -443,6 +464,7 @@ def main():
 
     successful = 0
     failed = 0
+    deferred = 0
 
     for tsv_file in tsv_files:
         if args.dry_run:
@@ -525,6 +547,10 @@ def main():
                     logger.warning(
                         "Impossible de déplacer le fichier traité vers 'parsed/': %s", e
                     )
+            elif file_report.get("status") == "deferred":
+                # InfluxDB indisponible : on laisse le fichier en place, il sera
+                # retrouvé par find_tsv_files() au prochain déclenchement du hook.
+                deferred += 1
             else:
                 failed += 1
                 # Erreur de traitement -> on le déplace dans error/
@@ -539,6 +565,7 @@ def main():
     logger.info("Processing complete!")
     logger.info("  Successful: %d", successful)
     logger.info("  Failed: %d", failed)
+    logger.info("  Deferred (InfluxDB indisponible, à rejouer): %d", deferred)
     logger.info("=" * 70)
 
     end_time = time.time()
@@ -546,7 +573,8 @@ def main():
     run_report["duration_s"] = end_time - start_time
     run_report["nb_files_success"] = successful
     run_report["nb_files_failed"] = failed
-    run_report["status"] = "success" if failed == 0 else "partial_failure"
+    run_report["nb_files_deferred"] = deferred
+    run_report["status"] = "success" if failed == 0 and deferred == 0 else "partial_failure"
 
     if args.dry_run:
         print(
