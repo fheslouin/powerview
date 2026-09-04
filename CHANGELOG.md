@@ -5,6 +5,14 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.5.1] - 2026-09-04
+
+### Corrigé
+
+- `check_ingestion.py` : un fichier `.env` / `.monitoring.env` illisible
+  (permissions) faisait crasher la vérification avant toute alerte ; dégradé
+  en warning.
+
 ## [0.5.0] - 2026-09-04
 
 ### Ajouté

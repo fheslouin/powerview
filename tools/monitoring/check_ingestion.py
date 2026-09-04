@@ -154,8 +154,13 @@ def main() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     )
 
-    load_dotenv(BASE_DIR / ".env")
-    load_dotenv(BASE_DIR / ".monitoring.env")
+    # Un fichier illisible (permissions) ne doit pas tuer le monitoring :
+    # on dégrade en warning, notify() se rabattra sur le log si NTFY_TOPIC manque.
+    for env_file in (BASE_DIR / ".env", BASE_DIR / ".monitoring.env"):
+        try:
+            load_dotenv(env_file)
+        except OSError as e:
+            logger.warning("Impossible de lire %s: %s", env_file, e)
 
     url = os.getenv("INFLUXDB_HOST") or os.getenv("INFLUXDB_URL")
     token = os.getenv("INFLUXDB_ADMIN_TOKEN")
