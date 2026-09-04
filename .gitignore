@@ -1,4 +1,7 @@
 .env
+.monitoring.env
+__pycache__/
+*.pyc
 vens/
 envs
 .aider*
