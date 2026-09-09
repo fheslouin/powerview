@@ -82,13 +82,17 @@ if [[ -n "${HEALTHCHECKS_PING_URL}" ]]; then
     curl -fsS -m 10 --retry 3 --data-raw "${msg}" "${HEALTHCHECKS_PING_URL}/fail" > /dev/null 2>&1
 fi
 
+# -4 : ntfy.sh compte le quota anonyme par préfixe IPv6 /64, partagé entre
+# VPS du même hébergeur -> 429 en IPv6 (voir docs/monitoring.md).
 if [[ -n "${NTFY_TOPIC}" ]]; then
-    curl -fsS -m 10 \
+    if ! curl -4 -fsS -m 10 \
         -H "Title: PowerView stack en panne" \
         -H "Priority: urgent" \
         -H "Tags: rotating_light" \
         --data-raw "${msg}" \
-        "${NTFY_SERVER}/${NTFY_TOPIC}" > /dev/null 2>&1
+        "${NTFY_SERVER}/${NTFY_TOPIC}" > /dev/null 2>&1; then
+        log "Notification ntfy refusée (HTTP) — voir healthchecks.io pour l'alerte"
+    fi
 fi
 
 exit 1

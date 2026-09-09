@@ -5,6 +5,28 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.0] - 2026-09-09
+
+### Ajouté
+
+- `check_ingestion.py` : l'alerte détaille chaque fichier en échec ou différé
+  (`bucket/campagne/device/nom` et cause), lus dans les points
+  `tsv_parser_file` du bucket meta. `influx_utils.py` écrit désormais la cause
+  (champ `error`) sur ces points.
+- `check_ingestion.py` : livraison « au moins une fois » via un fichier d'état
+  (`MONITORING_STATE_FILE`, défaut `logs/check_ingestion.state`) ; une alerte
+  refusée par ntfy est renvoyée au passage suivant au lieu d'être perdue.
+
+### Corrigé
+
+- Monitoring : les notifications ntfy partaient en IPv6 et étaient refusées
+  (`429 daily message quota reached`, quota anonyme compté par préfixe `/64`
+  partagé chez l'hébergeur). Les deux échecs de parsing du 2026-09-08 ont été
+  détectés mais jamais notifiés. IPv4 forcé dans `check_ingestion.py`
+  (`NTFY_FORCE_IPV4`, défaut 1) et `stack_watchdog.sh` (`curl -4`).
+- `check_ingestion.py` : le journal n'expose plus l'URL du topic ntfy en cas
+  d'échec d'envoi.
+
 ## [0.5.2] - 2026-09-09
 
 ### Corrigé

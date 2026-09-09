@@ -179,6 +179,11 @@ def write_run_summary_to_influx(
                 .field("nb_invalid_values", f.get("nb_invalid_values", 0))
                 .time(datetime.now(timezone.utc), WritePrecision.S)
             )
+            # Cause (error/deferred) : lue par tools/monitoring/check_ingestion.py
+            # pour détailler l'alerte ; champ absent sur les fichiers en succès.
+            error_msg = str(f.get("error") or "").strip()
+            if error_msg:
+                p_file = p_file.field("error", error_msg[:500])
             file_points.append(p_file)
 
         records: List[Point] = [p_run] + file_points
