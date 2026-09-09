@@ -5,6 +5,19 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.5.2] - 2026-09-09
+
+### Corrigé
+
+- `core.py` : les fichiers portant un bloc `START_HEADER` mais un marqueur
+  `MV_T302_V002` (device 02001315, campagne `AUE_corse/SARTENE`) partaient en
+  `error/` avec « Expected 1 fields in line 5, saw 25 ». Le parseur est
+  désormais choisi d'après la structure du fichier
+  (`TSVParserFactory.get_parser_for_file`) : bloc d'en-tête présent = parseur
+  V003, quel que soit le marqueur. La lecture des lignes de format est
+  centralisée dans `read_format_lines` (supprime trois copies de la même
+  boucle dans `core.py` et `tsv_parser.py`).
+
 ## [0.5.1] - 2026-09-04
 
 ### Corrigé

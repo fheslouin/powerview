@@ -20,6 +20,37 @@ class FileFormat(str, Enum):
     MV_T302_V003 = "MV_T302_V003"
 
 
+HEADER_BLOCK_START = "START_HEADER"
+DATA_BLOCK_START = "START_DATA"
+
+
+def read_format_lines(tsv_file: str) -> Tuple[List[str], List[str], bool]:
+    """
+    Lit les deux lignes de format d'un fichier TSV (SN devices, puis
+    format + canaux), en sautant l'éventuel bloc START_HEADER/END_HEADER.
+
+    Retourne (line1, line2, has_header_block). has_header_block vaut True si le
+    fichier commence par START_HEADER, ce qui impose le parseur V003 quel que
+    soit le marqueur textuel de line2[0] (certains boîtiers émettent un bloc
+    d'en-tête JSON tout en annonçant MV_T302_V002).
+    """
+    line1: List[str] = []
+    line2: List[str] = []
+    with open(tsv_file, "r", encoding="utf-8") as f:
+        first = f.readline().strip()
+        has_header_block = first == HEADER_BLOCK_START
+        if has_header_block:
+            for line in f:
+                if line.strip() == DATA_BLOCK_START:
+                    line1 = f.readline().strip().split("\t")
+                    line2 = f.readline().strip().split("\t")
+                    break
+        else:
+            line1 = first.split("\t")
+            line2 = f.readline().strip().split("\t")
+    return line1, line2, has_header_block
+
+
 def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
     """
     Essaie de parser un timestamp issu du TSV en datetime.
@@ -611,6 +642,28 @@ class TSVParserFactory:
             raise ValueError(f"Aucun parser enregistré pour le format : {file_format}")
         return parser_cls()
 
+    @classmethod
+    def get_parser_for_file(cls, tsv_file: str) -> Tuple[BaseTSVParser, str]:
+        """
+        Choisit le parseur d'après la structure réelle du fichier.
+
+        Retourne (parser, file_format) où file_format est le marqueur textuel
+        lu en ligne de format (ex: 'MV_T302_V002'), conservé pour les logs et
+        les rapports. Si le fichier porte un bloc START_HEADER, le parseur V003
+        est imposé même si le marqueur annonce V002 : le parseur V002 lit le
+        fichier avec skiprows=2 et ne sait pas sauter le bloc d'en-tête.
+        """
+        _line1, line2, has_header_block = read_format_lines(tsv_file)
+        file_format = line2[0] if line2 else ""
+        parser = cls.get_parser(file_format)
+        if has_header_block and not isinstance(parser, MV_T302_V003_Parser):
+            logger.info(
+                "  Bloc START_HEADER détecté avec marqueur %s : parseur V003 imposé",
+                file_format,
+            )
+            parser = cls._registry[FileFormat.MV_T302_V003]()
+        return parser, file_format
+
 
 # ---------------------------------------------------------------------------
 # Parsing du header (utilisé par les tests)
@@ -622,34 +675,14 @@ def parse_tsv_header(tsv_file: str) -> Tuple[List[Dict], str]:
     délègue la construction des mappings au parser adapté.
 
     Gère à la fois les fichiers "classiques" (V002) et ceux avec
-    START_HEADER/END_HEADER + START_DATA (V003).
+    START_HEADER/END_HEADER + START_DATA (V003, ou V002 hybride avec en-tête).
     """
-    with open(tsv_file, "r", encoding="utf-8") as f:
-        first = f.readline().strip()
-        if first == "START_HEADER":
-            # On saute le header JSON jusqu'à START_DATA
-            for line in f:
-                line = line.strip()
-                if line == "START_DATA":
-                    # Les deux prochaines lignes sont line1 et line2
-                    line1 = f.readline().strip().split("\t")
-                    line2 = f.readline().strip().split("\t")
-                    break
-        else:
-            # Cas V002 : on a déjà lu la première ligne
-            line1 = first.split("\t")
-            line2 = f.readline().strip().split("\t")
+    line1, line2, _has_header_block = read_format_lines(tsv_file)
+    parser, file_format = TSVParserFactory.get_parser_for_file(tsv_file)
 
-    file_format = line2[0]
-    parser = TSVParserFactory.get_parser(file_format)
-
-    if hasattr(parser, "build_channel_mappings"):
-        # Pour V003, parse_tsv_header() ne lit pas le JSON.
-        # => build_channel_mappings V003 doit pouvoir détecter tri/mono via Ph1/2/3.
-        channel_mappings, _ = parser.build_channel_mappings(line1, line2)
-    else:
-        # Fallback générique : on laisse le parser relire le fichier
-        channel_mappings, _ = parser.parse_header(tsv_file)
+    # Pour V003, parse_tsv_header() ne lit pas le JSON.
+    # => build_channel_mappings V003 doit pouvoir détecter tri/mono via Ph1/2/3.
+    channel_mappings, _ = parser.build_channel_mappings(line1, line2)
 
     return channel_mappings, file_format
 
@@ -662,25 +695,9 @@ def parse_tsv_data(
     table_name: str,
 ) -> Tuple[List[Any], Dict[str, Any]]:
     """
-    Parse les données en utilisant le parser adapté au format détecté
-    dans le header du fichier.
+    Parse les données en utilisant le parser adapté à la structure du fichier.
 
     Signature conservée pour compatibilité avec les tests.
     """
-    with open(tsv_file, "r", encoding="utf-8") as f:
-        first = f.readline().strip()
-        if first == "START_HEADER":
-            # Aller jusqu'à START_DATA puis lire line2
-            for line in f:
-                line = line.strip()
-                if line == "START_DATA":
-                    _line1 = f.readline().strip().split("\t")
-                    line2 = f.readline().strip().split("\t")
-                    break
-        else:
-            _line1 = first.split("\t")
-            line2 = f.readline().strip().split("\t")
-
-    file_format = line2[0]
-    parser = TSVParserFactory.get_parser(file_format)
+    parser, _file_format = TSVParserFactory.get_parser_for_file(tsv_file)
     return parser.parse_data(tsv_file, channel_mappings, campaign, bucket_name, table_name)

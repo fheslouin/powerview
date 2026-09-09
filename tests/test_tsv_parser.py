@@ -880,3 +880,97 @@ def test_main_aborts_without_touching_files_when_ping_fails(monkeypatch, tmp_pat
     assert tsv_file.exists()
     assert not (tsv_file.parent / "error").exists()
     assert not (tsv_file.parent / "parsed").exists()
+
+
+# ---------------------------------------------------------------------------
+# Format hybride : bloc START_HEADER (V003) + marqueur MV_T302_V002
+# ---------------------------------------------------------------------------
+
+HYBRID_V002_WITH_HEADER = """
+    START_HEADER
+    {"DataZoneCode":3,"DataTypeCode":2,"DataTimeSettings":"UTC","FileVersion":2,"MasterType":"Tri"}
+    END_HEADER
+    START_DATA
+    02001315\t02001315\t02001315\t02001315\t02001315\t04001486
+    MV_T302_V002\tPh 1 V\tPh 2 V\tPh 3 V\tID36 W\tID39L1 W
+    08/09/26 14:50:00\t243.40\t242.57\t243.19\t347.3\t16.6
+    08/09/26 15:00:00\t243.06\t242.24\t242.56\t347.6\t3.1
+    END_DATA
+"""
+
+
+def test_get_parser_for_file_forces_v003_when_header_block_present(tmp_path):
+    """
+    Un fichier avec bloc START_HEADER mais marqueur MV_T302_V002 doit être lu
+    par le parseur V003 (le V002 fait skiprows=2 et casse sur END_HEADER).
+    Le marqueur textuel reste remonté tel quel.
+    """
+    from core import MV_T302_V002_Parser, MV_T302_V003_Parser, TSVParserFactory
+
+    tsv_file = write_tmp_tsv(tmp_path, HYBRID_V002_WITH_HEADER)
+    parser, file_format = TSVParserFactory.get_parser_for_file(str(tsv_file))
+    assert isinstance(parser, MV_T302_V003_Parser)
+    assert file_format == "MV_T302_V002"
+
+    # Un V002 pur reste sur le parseur V002
+    plain = write_tmp_tsv(
+        tmp_path / "plain",
+        """
+        02001315\t02001315
+        MV_T302_V002\tPh 1 V
+        08/09/26 14:50:00\t243.40
+        """,
+    ) if (tmp_path / "plain").mkdir() is None else None
+    parser, file_format = TSVParserFactory.get_parser_for_file(str(plain))
+    assert isinstance(parser, MV_T302_V002_Parser)
+    assert file_format == "MV_T302_V002"
+
+
+def test_parse_tsv_data_hybrid_v002_with_header_creates_points(tmp_path):
+    """
+    parse_tsv_header + parse_tsv_data sur le format hybride : mappings V002
+    corrects (tri, master + slave) et points créés sans erreur de tokenisation.
+    """
+    tsv_file = write_tmp_tsv(tmp_path, HYBRID_V002_WITH_HEADER)
+    channel_mappings, file_format = parse_tsv_header(str(tsv_file))
+    assert file_format == "MV_T302_V002"
+    assert [m["channel_id"] for m in channel_mappings] == [
+        "M02001315_U1",
+        "M02001315_U2",
+        "M02001315_U3",
+        "M02001315_Ch1",
+        "M02001315_S04001486_Ch1",
+    ]
+
+    points, stats = parse_tsv_data(
+        str(tsv_file), channel_mappings, "SARTENE", "AUE_corse", "electrical"
+    )
+    assert stats["nb_rows"] == 2
+    assert stats["nb_points"] == 2 * 5
+    assert stats["nb_invalid_timestamps"] == 0
+    assert stats["nb_invalid_values"] == 0
+    assert stats["file_header_meta"]["FileVersion"] == 2
+
+
+def test_hybrid_v002_with_header_real_file_from_prod():
+    """
+    Fichier réel AUE_corse/SARTENE/02001315 (2026-09-09) qui partait en
+    error/ en prod avec « Expected 1 fields in line 5, saw 25 ».
+    """
+    from core import TSVParserFactory
+
+    tsv_path = Path("data/format_v002_with_header/02001315/T302_260909_031459_UTC.tsv")
+    assert tsv_path.exists(), f"Fixture manquante : {tsv_path}"
+
+    parser, file_format = TSVParserFactory.get_parser_for_file(str(tsv_path))
+    assert file_format == "MV_T302_V002"
+    points, stats = parser.parse(
+        str(tsv_path), campaign="SARTENE", bucket_name="AUE_corse", table_name="electrical"
+    )
+    assert stats["nb_rows"] == 62
+    assert stats["nb_channels"] == 24
+    assert stats["nb_points"] == 62 * 24
+    assert stats["nb_invalid_timestamps"] == 0
+    assert stats["nb_invalid_values"] == 0
+    assert stats["channels"]["M02001315_U1"]["device_type"] == "master"
+    assert stats["channels"]["M02001315_S04001486_Ch1"]["device_type"] == "slave"

@@ -216,28 +216,14 @@ def process_tsv_file(
         # S'assure que le bucket existe
         create_bucket_if_not_exists(client, bucket_name, org)
 
-        # Lecture rapide du header pour récupérer le format
-        with open(tsv_file, "r", encoding="utf-8") as f:
-            first = f.readline().strip()
-            if first == "START_HEADER":
-                for line in f:
-                    line = line.strip()
-                    if line == "START_DATA":
-                        _line1 = f.readline().strip().split("\t")
-                        line2 = f.readline().strip().split("\t")
-                        break
-            else:
-                _line1 = first.split("\t")
-                line2 = f.readline().strip().split("\t")
-        file_format = line2[0]
+        # Parser adapté à la structure réelle du fichier (bloc START_HEADER
+        # éventuel) et marqueur de format lu en ligne de format
+        parser, file_format = TSVParserFactory.get_parser_for_file(tsv_file)
 
         logger.info("  Bucket: %s", bucket_name)
         logger.info("  Campaign: %s", campaign_name)
         logger.info("  Master device: %s", device_master_sn)
         logger.info("  File format: %s", file_format)
-
-        # Parser adapté au format
-        parser = TSVParserFactory.get_parser(file_format)
 
         # Parse complet (header + data) avec les bons tags
         # Schéma unifié : measurement = "electrical"
@@ -505,7 +491,7 @@ def main():
                 logger.info("  Channels: %d", len(channel_mappings))
                 logger.info("  File format: %s", file_format)
 
-                parser_impl = TSVParserFactory.get_parser(file_format)
+                parser_impl, _ = TSVParserFactory.get_parser_for_file(tsv_file)
 
                 _, stats = parser_impl.parse(
                     tsv_file,
