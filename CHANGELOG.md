@@ -5,6 +5,17 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.1] - 2026-09-16
+
+### Corrigé
+
+- `check_ingestion.py` : le signal « aucun run récent » lisait le dernier
+  point de la première série `tsv_parser_run` renvoyée (tag `status`), donc
+  potentiellement un vieux run en échec partiel plutôt que le dernier run
+  réussi. Fausses alertes horaires du 10 au 16 septembre 2026 alors que le
+  pipeline tournait. La requête Flux dégroupe (`group()`) avant `last()` et
+  le script retient le maximum des timestamps renvoyés.
+
 ## [0.6.0] - 2026-09-09
 
 ### Ajouté

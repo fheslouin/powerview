@@ -108,19 +108,29 @@ def query_last_run_time(
     """
     Retourne le timestamp du dernier run tsv_parser_run, ou None si aucun
     run sur les 30 derniers jours.
+
+    Les points sont taggés ``status`` (success, partial_failure...) : sans
+    ``group()``, ``last()`` renvoie un point par série et le premier tableau
+    peut être celui d'un vieux run en échec (fausse alerte « aucun run
+    récent » pendant 30 jours, incident du 2026-09-10). On dégroupe donc, et
+    on garde par sécurité le maximum de tout ce qui revient.
     """
     flux = f"""
 from(bucket: "{meta_bucket}")
   |> range(start: -30d)
   |> filter(fn: (r) => r._measurement == "tsv_parser_run")
   |> filter(fn: (r) => r._field == "nb_files_total")
+  |> group()
   |> last()
 """
     tables = client.query_api().query(org=org, query=flux)
+    latest: Optional[datetime] = None
     for table in tables:
         for record in table.records:
-            return record.get_time()
-    return None
+            t = record.get_time()
+            if t is not None and (latest is None or t > latest):
+                latest = t
+    return latest
 
 
 def query_recent_failures(

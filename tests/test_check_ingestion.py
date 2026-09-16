@@ -114,6 +114,43 @@ def test_check_ingestion_stale_run(monkeypatch):
     assert "Dernier run du parser" in problems[0]
 
 
+def test_query_last_run_time_takes_newest_across_series():
+    """
+    Les points tsv_parser_run sont taggés status : plusieurs séries peuvent
+    revenir, la plus ancienne en premier. On doit retenir la plus récente
+    (régression du 2026-09-10 : 6 jours de fausses alertes).
+    """
+    now = datetime.now(timezone.utc)
+    old_failure = now - timedelta(days=7)
+    recent_success = now - timedelta(hours=2)
+
+    class TwoSeriesQueryAPI:
+        def __init__(self):
+            self.queries: List[str] = []
+
+        def query(self, org: str, query: str) -> List[FakeTable]:
+            self.queries.append(query)
+            return [
+                FakeTable([FakeRecord("nb_files_total", 2, old_failure, {"status": "partial_failure"})]),
+                FakeTable([FakeRecord("nb_files_total", 1, recent_success, {"status": "success"})]),
+            ]
+
+    class TwoSeriesClient:
+        def __init__(self):
+            self.api = TwoSeriesQueryAPI()
+
+        def query_api(self):
+            return self.api
+
+    client = TwoSeriesClient()
+    last = check_ingestion.query_last_run_time(client, "org", "powerview_meta")
+
+    assert last == recent_success
+    # La requête Flux dégroupe avant last() pour n'avoir qu'une série
+    assert "|> group()" in client.api.queries[0]
+    assert client.api.queries[0].index("group()") < client.api.queries[0].index("last()")
+
+
 def test_check_ingestion_no_run_at_all():
     """Aucun run sur 30 jours : problème remonté."""
     client = FakeClient(last_run=None)
