@@ -5,6 +5,31 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.3] - 2026-09-23
+
+### Corrigé
+
+- `manage_influx_tokens.py` : les tâches de downsampling continu relisaient
+  `range(start: -task.every)`, soit la dernière heure de timestamps pour
+  `_1h`. Les boîtiers envoyant une fois par jour un fichier couvrant les 24 h
+  précédentes, une seule heure par jour et par voie était agrégée (mesuré sur
+  `AUE_corse_1h` : 102 points/jour au lieu de 2 448) et les vues Grafana de
+  plusieurs jours, qui lisent `_1h`, étaient quasi vides. Chaque exécution
+  recalcule désormais toutes les fenêtres d'un `lookback` par niveau
+  (`3d` pour `_1h`, `14d` pour `_1d`, `5w` pour `_1w`), borne tronquée à une
+  fenêtre entière (`date.truncate`) ; `to()` écrase les points, l'opération
+  est idempotente.
+- `manage_influx_tokens.py` : une tâche existante dont le script diffère de
+  la version courante est mise à jour en place (`influx task update`) au lieu
+  d'être ignorée.
+
+### Ajouté
+
+- `manage_influx_tokens.py --tasks-only` : applique buckets et tâches de
+  downsampling sans lire ni créer de token (pour mettre à jour les tâches des
+  clients existants sans passer par le playbook).
+- `tests/test_manage_influx_tokens.py`.
+
 ## [0.6.2] - 2026-09-23
 
 ### Corrigé

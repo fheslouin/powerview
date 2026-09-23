@@ -44,11 +44,40 @@ logger = logging.getLogger(__name__)
 
 # Niveaux de downsampling créés pour chaque bucket client.
 # Ordre croissant d'agrégation : 1h → 1d → 1w.
+#
+# `lookback` : profondeur de relecture du bucket brut à chaque exécution. Les
+# boîtiers envoient une fois par jour (01:15 UTC) un fichier couvrant les 24 h
+# précédentes : une tâche qui ne relirait que `-task.every` (la dernière heure
+# de timestamps) n'agrégerait qu'une heure par jour. Chaque exécution recalcule
+# donc toutes les fenêtres du lookback ; `to()` écrase les points existants,
+# l'opération est idempotente. Un rejeu plus ancien que le lookback passe par
+# backfill_downsample.py.
 DOWNSAMPLE_LEVELS = [
-    {"suffix": "1h", "every": "1h", "offset": "5m"},
-    {"suffix": "1d", "every": "1d", "offset": "1h"},
-    {"suffix": "1w", "every": "1w", "offset": "2h"},
+    {"suffix": "1h", "every": "1h", "offset": "5m", "lookback": "3d"},
+    {"suffix": "1d", "every": "1d", "offset": "1h", "lookback": "14d"},
+    {"suffix": "1w", "every": "1w", "offset": "2h", "lookback": "5w"},
 ]
+
+
+def build_downsample_task_flux(bucket_name: str, org: str, level: Dict[str, str]) -> str:
+    """
+    Script Flux d'une tâche de downsampling continu pour un niveau donné.
+
+    La borne de départ est tronquée à une fenêtre entière (`date.truncate`)
+    pour que la plus ancienne fenêtre relue soit complète et non une moyenne
+    partielle.
+    """
+    task_name = f"downsample_{bucket_name}_{level['suffix']}"
+    ds_bucket = f"{bucket_name}_{level['suffix']}"
+    return (
+        'import "date"\n\n'
+        f'option task = {{name: "{task_name}", every: {level["every"]}, offset: {level["offset"]}}}\n\n'
+        f'from(bucket: "{bucket_name}")\n'
+        f'  |> range(start: date.truncate(t: -{level["lookback"]}, unit: {level["every"]}))\n'
+        f'  |> filter(fn: (r) => r._measurement == "electrical")\n'
+        f'  |> aggregateWindow(every: {level["every"]}, fn: mean, createEmpty: false)\n'
+        f'  |> to(bucket: "{ds_bucket}", org: "{org}")\n'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -383,9 +412,9 @@ def ensure_downsampled_buckets_cli(bucket_name: str, org: str) -> Dict[str, str]
 
 def ensure_downsample_tasks_cli(bucket_name: str, org: str) -> None:
     """
-    Crée les InfluxDB Tasks de downsampling si elles n'existent pas encore.
-    Utilise le token admin courant (INFLUX_TOKEN) — les tasks sont exécutées
-    avec les permissions admin.
+    Crée les InfluxDB Tasks de downsampling si elles n'existent pas encore, et
+    met à jour le script de celles dont le Flux diffère de la version courante
+    (`build_downsample_task_flux`). Utilise le token admin courant (INFLUX_TOKEN).
     """
     # Récupère la liste des tasks existantes pour filtrer par nom
     try:
@@ -398,26 +427,21 @@ def ensure_downsample_tasks_cli(bucket_name: str, org: str) -> None:
         return
 
     existing_tasks: List[Dict[str, Any]] = data if isinstance(data, list) else (data.get("tasks") or [])
-    existing_names = {t.get("name") for t in existing_tasks if isinstance(t, dict)}
+    existing_by_name: Dict[str, Dict[str, Any]] = {
+        t["name"]: t for t in existing_tasks if isinstance(t, dict) and t.get("name")
+    }
 
     for level in DOWNSAMPLE_LEVELS:
         task_name = f"downsample_{bucket_name}_{level['suffix']}"
-        if task_name in existing_names:
+        flux = build_downsample_task_flux(bucket_name, org, level)
+        existing = existing_by_name.get(task_name)
+
+        if existing is not None and (existing.get("flux") or "").strip() == flux.strip():
             print(
-                f"[manage_influx_tokens] Task '{task_name}' existe déjà, skip.",
+                f"[manage_influx_tokens] Task '{task_name}' à jour, skip.",
                 file=sys.stderr,
             )
             continue
-
-        ds_bucket = f"{bucket_name}_{level['suffix']}"
-        flux = (
-            f'option task = {{name: "{task_name}", every: {level["every"]}, offset: {level["offset"]}}}\n\n'
-            f'from(bucket: "{bucket_name}")\n'
-            f'  |> range(start: -task.every)\n'
-            f'  |> filter(fn: (r) => r._measurement == "electrical")\n'
-            f'  |> aggregateWindow(every: {level["every"]}, fn: mean, createEmpty: false)\n'
-            f'  |> to(bucket: "{ds_bucket}", org: "{org}")\n'
-        )
 
         tmp_path: Optional[str] = None
         try:
@@ -427,14 +451,23 @@ def ensure_downsample_tasks_cli(bucket_name: str, org: str) -> None:
                 f.write(flux)
                 tmp_path = f.name
 
-            _run_influx_cmd(["task", "create", "--org", org, "--file", tmp_path])
-            print(
-                f"[manage_influx_tokens] Task '{task_name}' créée.",
-                file=sys.stderr,
-            )
+            if existing is not None and existing.get("id"):
+                _run_influx_cmd(
+                    ["task", "update", "--id", str(existing["id"]), "--file", tmp_path]
+                )
+                print(
+                    f"[manage_influx_tokens] Task '{task_name}' mise à jour (script obsolète).",
+                    file=sys.stderr,
+                )
+            else:
+                _run_influx_cmd(["task", "create", "--org", org, "--file", tmp_path])
+                print(
+                    f"[manage_influx_tokens] Task '{task_name}' créée.",
+                    file=sys.stderr,
+                )
         except RuntimeError as e:
             print(
-                f"[manage_influx_tokens] Erreur création task '{task_name}': {e}",
+                f"[manage_influx_tokens] Erreur création/mise à jour task '{task_name}': {e}",
                 file=sys.stderr,
             )
         finally:
@@ -454,6 +487,14 @@ def main() -> None:
         "--bucket",
         required=True,
         help="Nom du bucket InfluxDB (par ex. company1)",
+    )
+    parser.add_argument(
+        "--tasks-only",
+        action="store_true",
+        help=(
+            "Ne gère que les buckets et les tâches de downsampling (création ou "
+            "mise à jour du script), sans lire ni créer de token."
+        ),
     )
     args = parser.parse_args()
 
@@ -478,6 +519,10 @@ def main() -> None:
         # 4) Créer les buckets de downsampling si absents (idempotent)
         ds_ids = ensure_downsampled_buckets_cli(bucket_name, org)
         all_read_ids = [raw_bucket_id] + list(ds_ids.values())
+
+        if args.tasks_only:
+            ensure_downsample_tasks_cli(bucket_name, org)
+            return
 
         # 5) Voir si un token valide existe déjà (couvrant les 4 buckets)
         existing = find_existing_token_for_bucket_cli(bucket_name, org, all_read_ids)
