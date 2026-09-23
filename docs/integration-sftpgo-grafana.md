@@ -62,9 +62,10 @@ Le client peut alors :
 
 La configuration (via `/etc/sftpgo/sftpgo.env`) indique à SFTPGo :
 
-- d’exécuter `/srv/powerview/on-upload.sh` sur certains événements ;
-- de passer des variables d’environnement comme `SFTPGO_ACTION` et
-  `SFTPGO_ACTION_PATH`.
+- d’exécuter `/srv/powerview/on-upload.sh` sur certains événements ;
+- de passer la variable d’environnement `SFTPGO_ACTION` (`upload` ou `mkdir`).
+  `SFTPGO_ACTION_PATH` n’est fourni que par le hook d’action `mkdir` ; le hook
+  `post_disconnect` utilisé pour `upload` ne le renseigne pas.
 
 Exemple de configuration :
 
@@ -91,19 +92,19 @@ Il gère deux cas principaux :
 
 Lorsqu’un client termine un upload de fichier TSV :
 
-1. SFTPGo déclenche le hook `post_disconnect` avec :
-   - `SFTPGO_ACTION=upload` ;
-   - `SFTPGO_ACTION_PATH=/srv/sftpgo/data/company1/campaign1/02001084/T302_251012_031720.tsv`.
+1. SFTPGo déclenche le hook `post_disconnect` à la fin de la session, avec
+   `SFTPGO_ACTION=upload` et sans `SFTPGO_ACTION_PATH`.
 
-2. `on-upload.sh` :
-   - active l’environnement virtuel Python (`/srv/powerview/envs/powerview`) ;
-   - charge les variables de `.env` ;
-   - appelle :
+2. `on-upload.sh` :
+   - prend un verrou `flock` (`logs/on-upload.lock`) pour sérialiser les runs ;
+   - active l’environnement virtuel Python (`/srv/powerview/envs/powerview`) ;
+   - charge les variables de `.env` ;
+   - appelle :
      ```bash
-     python3 tsv_parser.py \
-       --dataFolder /srv/sftpgo/data \
-       --tsvFile "$SFTPGO_ACTION_PATH"
+     python3 tsv_parser.py --dataFolder /srv/sftpgo/data
      ```
+     qui balaie tous les `.tsv` en attente (hors `parsed/` et `error/`).
+     Avant traitement, `select_ready_files()` laisse en place tout fichier encore en cours d'upload par une autre session (ouvert par un autre processus, ou sans `END_DATA` final et modifié depuis moins de `TSV_INCOMPLETE_GRACE_S` s, défaut 600) : il sera repris au prochain déclenchement du hook.
 
 3. `tsv_parser.py` :
    - parse le fichier ;

@@ -64,12 +64,18 @@ PowerView est composé des éléments suivants :
    ```
 
 2. À la fin de la session, SFTPGo déclenche le hook `post_disconnect` avec
-   `SFTPGO_ACTION=upload`.
+   `SFTPGO_ACTION=upload`, **sans** `SFTPGO_ACTION_PATH` : le hook ne connaît
+   pas le fichier envoyé, et il est déclenché par la déconnexion de n'importe
+   quelle session (plusieurs boîtiers uploadent en même temps).
 
-3. `on-upload.sh` est exécuté :
-   - active le venv Python ;
-   - charge `.env` ;
-   - appelle `tsv_parser.py` avec `--dataFolder` et `--tsvFile`.
+3. `on-upload.sh` est exécuté :
+   - prend un verrou `flock` (`logs/on-upload.lock`) pour sérialiser les runs ;
+   - active le venv Python ;
+   - charge `.env` ;
+   - appelle `tsv_parser.py --dataFolder /srv/sftpgo/data`, qui balaie tous
+     les `.tsv` en attente (hors `parsed/` et `error/`).
+
+   Avant traitement, `select_ready_files()` laisse en place tout fichier encore en cours d'upload par une autre session (ouvert par un autre processus, ou sans `END_DATA` final et modifié depuis moins de `TSV_INCOMPLETE_GRACE_S` s, défaut 600) : il sera repris au prochain déclenchement du hook.
 
 4. `tsv_parser.py` :
    - utilise `fs_utils.extract_path_components` pour extraire

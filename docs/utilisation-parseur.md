@@ -440,19 +440,20 @@ Le script `on-upload.sh` est appelé par SFTPGo avec différentes valeurs de
 
 ### 6.1 Cas `SFTPGO_ACTION=upload`
 
-1. SFTPGo appelle `on-upload.sh` avec :
-   - `SFTPGO_ACTION=upload`  
-   - `SFTPGO_ACTION_PATH=<chemin_absolu_du_fichier>`.
+1. SFTPGo appelle `on-upload.sh` à la fin de la session (hook
+   `post_disconnect`) avec `SFTPGO_ACTION=upload`, sans `SFTPGO_ACTION_PATH`.
+   Le mode `--tsvFile` sert au rejeu manuel d’un fichier (section 4).
 
-2. `on-upload.sh` :
-   - active l’environnement virtuel Python ;
-   - charge les variables de `.env` ;
-   - appelle :
+2. `on-upload.sh` :
+   - prend un verrou `flock` (`logs/on-upload.lock`) pour sérialiser les runs ;
+   - active l’environnement virtuel Python ;
+   - charge les variables de `.env` ;
+   - appelle :
      ```bash
-     python3 tsv_parser.py \
-       --dataFolder /srv/sftpgo/data \
-       --tsvFile "$SFTPGO_ACTION_PATH"
+     python3 tsv_parser.py --dataFolder /srv/sftpgo/data
      ```
+     qui balaie tous les `.tsv` en attente (hors `parsed/` et `error/`).
+     Avant traitement, `select_ready_files()` laisse en place tout fichier encore en cours d'upload par une autre session (ouvert par un autre processus, ou sans `END_DATA` final et modifié depuis moins de `TSV_INCOMPLETE_GRACE_S` s, défaut 600) : il sera repris au prochain déclenchement du hook.
 
 3. `tsv_parser.py` :
    - parse le fichier (V002 ou V003) ;

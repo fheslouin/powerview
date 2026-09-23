@@ -375,13 +375,14 @@ Par exemple :
 /srv/sftpgo/data/company1/campaign_test/02001084/T302_251012_031720.tsv
 ```
 
-SFTPGo déclenche `on-upload.sh` avec `SFTPGO_ACTION=upload` (via le hook `post_disconnect`), qui :
+SFTPGo déclenche `on-upload.sh` avec `SFTPGO_ACTION=upload` (via le hook `post_disconnect`,
+sans `SFTPGO_ACTION_PATH`), qui :
 
+- prend un verrou `flock` (`logs/on-upload.lock`) pour sérialiser les runs,
 - active l’environnement virtuel Python,
 - charge `.env`,
-- appelle `tsv_parser.py` avec :
-  - `--dataFolder /srv/sftpgo/data`
-  - `--tsvFile "$SFTPGO_ACTION_PATH"`
+- appelle `tsv_parser.py --dataFolder /srv/sftpgo/data`, qui balaie tous les `.tsv`
+  en attente. Avant traitement, `select_ready_files()` laisse en place tout fichier encore en cours d'upload par une autre session (ouvert par un autre processus, ou sans `END_DATA` final et modifié depuis moins de `TSV_INCOMPLETE_GRACE_S` s, défaut 600) : il sera repris au prochain déclenchement du hook.
 
 Après succès :
 
