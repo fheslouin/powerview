@@ -5,6 +5,29 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.2] - 2026-09-23
+
+### Corrigé
+
+- `tsv_parser.py` : un fichier encore en cours d'upload par un autre boîtier
+  pouvait être lu tronqué, ingéré partiellement puis déplacé en `parsed/`
+  (l'upload se poursuivait dans le fichier déplacé, complet sur disque mais
+  incomplet dans InfluxDB). Cause : le hook est déclenché à la déconnexion de
+  n'importe quelle session (`post_disconnect_hook`, sans chemin de fichier) et
+  le parseur balaie alors tout le dossier de données. Constaté sur
+  `AUE_corse/SARTENE` le 16/09/2026 (153 lignes manquantes sur le master
+  02001310, du 15/09 12:40 au 16/09 14:00 UTC) et le 22/09/2026 (1 et 12
+  lignes). Le parseur laisse désormais en place, pour le prochain run, tout
+  fichier ouvert par un autre processus (`fs_utils.is_file_open_elsewhere`,
+  lecture de `/proc`) ou dont le bloc `END_DATA` manque alors qu'il a été
+  modifié il y a moins de `TSV_INCOMPLETE_GRACE_S` secondes (défaut 600).
+  Les fichiers ignorés sont listés dans le rapport (`nb_files_skipped`,
+  `skipped_files`).
+- `on-upload.sh` : les runs du parseur sont sérialisés par un verrou `flock`
+  (`logs/on-upload.lock`, attente 15 min) pour éviter que deux hooks
+  déclenchés à quelques secondes d'intervalle traitent les mêmes fichiers.
+- `_version.py` réaligné sur ce CHANGELOG (était resté à 0.5.1).
+
 ## [0.6.1] - 2026-09-16
 
 ### Corrigé

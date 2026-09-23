@@ -22,6 +22,28 @@ class FileFormat(str, Enum):
 
 HEADER_BLOCK_START = "START_HEADER"
 DATA_BLOCK_START = "START_DATA"
+DATA_BLOCK_END = "END_DATA"
+
+
+def has_complete_data_block(tsv_file: str, tail_bytes: int = 4096) -> bool:
+    """
+    Indique si un fichier porteur d'un bloc START_HEADER se termine bien par
+    le marqueur END_DATA.
+
+    Un fichier V003 (ou V002 hybride) sans END_DATA est incomplet : soit son
+    upload est encore en cours, soit il a été tronqué à la source. Les fichiers
+    sans bloc d'en-tête n'ont pas de marqueur de fin : on les considère complets.
+    """
+    with open(tsv_file, "rb") as f:
+        first = f.readline().strip()
+        if first != HEADER_BLOCK_START.encode("utf-8"):
+            return True
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - tail_bytes))
+        tail = f.read().decode("utf-8", errors="replace")
+    lines = [line.strip() for line in tail.splitlines() if line.strip()]
+    return bool(lines) and lines[-1] == DATA_BLOCK_END
 
 
 def read_format_lines(tsv_file: str) -> Tuple[List[str], List[str], bool]:

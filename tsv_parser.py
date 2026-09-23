@@ -18,10 +18,12 @@ import requests
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
-from core import TSVParserFactory, parse_tsv_header, parse_timestamp
+from core import TSVParserFactory, has_complete_data_block, parse_tsv_header, parse_timestamp
 from fs_utils import (
     extract_path_components as _extract_path_components,
+    file_age_seconds,
     find_tsv_files,
+    is_file_open_elsewhere,
     move_parsed_file,
     move_error_file,
 )
@@ -167,6 +169,60 @@ def _compute_time_range_from_tsv(tsv_file: str) -> Tuple[str, str]:
     start_iso = start_dt.replace(tzinfo=timezone.utc).isoformat()
     end_iso = end_dt.replace(tzinfo=timezone.utc).isoformat()
     return start_iso, end_iso
+
+
+# Délai (secondes) pendant lequel un fichier sans END_DATA est présumé encore
+# en cours d'upload plutôt que tronqué à la source. Surchargeable via
+# TSV_INCOMPLETE_GRACE_S.
+DEFAULT_INCOMPLETE_GRACE_S = 600.0
+
+
+def select_ready_files(
+    tsv_files: List[str],
+    grace_s: float = DEFAULT_INCOMPLETE_GRACE_S,
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """
+    Sépare les fichiers prêts à ingérer de ceux dont l'upload est encore en cours.
+
+    Le hook SFTPGo est déclenché à la déconnexion de n'importe quelle session et
+    le parseur balaie alors tout le dossier de données : un fichier qu'un autre
+    boîtier est en train d'envoyer (écriture en place, `upload_mode` 0) serait
+    lu tronqué, ingéré partiellement puis déplacé en `parsed/`. Un fichier est
+    laissé en place, pour le prochain déclenchement, si :
+
+    - il est ouvert par un autre processus (SFTPGo en cours d'écriture) ;
+    - il porte un bloc START_HEADER sans END_DATA final et a été modifié il y a
+      moins de `grace_s` secondes. Passé ce délai, il est considéré tronqué à la
+      source et ingéré tel quel (avec avertissement) plutôt que bloqué à jamais.
+
+    Retourne (fichiers_prêts, [(fichier_ignoré, raison), ...]).
+    """
+    ready: List[str] = []
+    skipped: List[Tuple[str, str]] = []
+    for tsv_file in tsv_files:
+        try:
+            if is_file_open_elsewhere(tsv_file):
+                skipped.append((tsv_file, "fichier ouvert par un autre processus (upload en cours)"))
+                continue
+            if not has_complete_data_block(tsv_file):
+                age = file_age_seconds(tsv_file)
+                if age < grace_s:
+                    skipped.append(
+                        (tsv_file, f"bloc END_DATA absent, fichier modifié il y a {age:.0f}s")
+                    )
+                    continue
+                logger.warning(
+                    "  ⚠ Bloc END_DATA absent mais fichier inchangé depuis %.0fs : "
+                    "présumé tronqué à la source, ingéré tel quel : %s",
+                    age,
+                    tsv_file,
+                )
+        except OSError as e:
+            # Fichier disparu entre le listing et le contrôle : process_tsv_file
+            # remontera l'erreur de façon habituelle.
+            logger.debug("Contrôle de complétude impossible pour %s: %s", tsv_file, e)
+        ready.append(tsv_file)
+    return ready, skipped
 
 
 def process_tsv_file(
@@ -405,6 +461,17 @@ def main():
         logger.info("No TSV files found to process.")
         return
 
+    # Écarte les fichiers dont l'upload est encore en cours : ils restent en
+    # place et seront repris au prochain déclenchement du hook.
+    grace_s = float(os.getenv("TSV_INCOMPLETE_GRACE_S", DEFAULT_INCOMPLETE_GRACE_S))
+    tsv_files, skipped_files = select_ready_files(tsv_files, grace_s=grace_s)
+    for skipped_path, reason in skipped_files:
+        logger.warning("  ⏸ Fichier laissé en place pour le prochain run (%s): %s", reason, skipped_path)
+
+    if not tsv_files:
+        logger.info("No TSV files ready to process (%d en cours d'upload).", len(skipped_files))
+        return
+
     logger.info("Found %d TSV file(s) to process.", len(tsv_files))
 
     client: Any = None
@@ -442,6 +509,10 @@ def main():
         "nb_files_success": 0,
         "nb_files_failed": 0,
         "nb_files_deferred": 0,
+        "nb_files_skipped": len(skipped_files),
+        "skipped_files": [
+            {"file_path": path, "reason": reason} for path, reason in skipped_files
+        ],
         "nb_points_total": 0,
         "status": "success",
         "files": [],
@@ -552,6 +623,7 @@ def main():
     logger.info("  Successful: %d", successful)
     logger.info("  Failed: %d", failed)
     logger.info("  Deferred (InfluxDB indisponible, à rejouer): %d", deferred)
+    logger.info("  Skipped (upload en cours, repris au prochain run): %d", len(skipped_files))
     logger.info("=" * 70)
 
     end_time = time.time()

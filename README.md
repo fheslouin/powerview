@@ -101,6 +101,7 @@ ansible-playbook grafana-automation/playbooks/create_grafana_resources.yml \
 | `TSV_META_BUCKET` | non | Bucket de métadonnées (défaut : `powerview_meta`) |
 | `TSV_LOG_LEVEL` | non | Niveau de log (défaut : `INFO`) |
 | `TSV_REPORT_DIR` | non | Dossier des rapports JSON |
+| `TSV_INCOMPLETE_GRACE_S` | non | Délai (s) pendant lequel un fichier sans `END_DATA` est présumé en cours d'upload et laissé en place (défaut : `600`) |
 
 > Pointer `GRAFANA_URL` vers l'URL **interne** du service pour éviter les règles
 > du reverse-proxy Caddy sur les routes API (`/api/teams/search`, etc.).

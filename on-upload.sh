@@ -15,6 +15,8 @@ readonly SFTPGO_BASE="${BASE_DIR}/sftpgo"
 readonly POWERVIEW_BASE="${BASE_DIR}/powerview"
 
 readonly LOG_FILE="${SFTPGO_BASE}/logs/uploads.log"
+readonly LOCK_FILE="${SFTPGO_BASE}/logs/on-upload.lock"
+readonly LOCK_TIMEOUT_S=900
 readonly DATA_DIR="${SFTPGO_BASE}/data"
 readonly VENV_PATH="${POWERVIEW_BASE}/envs/powerview/bin/activate"
 readonly ENV_FILE="${POWERVIEW_BASE}/.env"
@@ -111,6 +113,16 @@ handle_upload() {
 
     # On loggue quand même pour voir ce que SFTPGo nous passe
     log "Upload complete action triggered. SFTPGO_ACTION_PATH='${file_path:-<unset>}'"
+
+    # Sérialise les runs du parseur : le hook est déclenché à chaque déconnexion
+    # de session et plusieurs boîtiers se déconnectent à quelques secondes
+    # d'intervalle. Deux parseurs concurrents balaieraient le même dossier et se
+    # disputeraient les mêmes fichiers (double écriture, échec de déplacement).
+    exec 9>>"${LOCK_FILE}"
+    if ! flock -w "${LOCK_TIMEOUT_S}" 9; then
+        log "ERROR: verrou ${LOCK_FILE} non obtenu après ${LOCK_TIMEOUT_S}s, run abandonné (les fichiers restent en place)"
+        return 0
+    fi
 
     setup_environment
 

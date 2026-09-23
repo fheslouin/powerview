@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from typing import List, Tuple
 
@@ -80,3 +81,47 @@ def find_tsv_files(base_folder: str) -> List[str]:
             if file.endswith('.tsv'):
                 tsv_files.append(os.path.join(root, file))
     return tsv_files
+
+
+def file_age_seconds(path: str) -> float:
+    """
+    Ancienneté du fichier en secondes, d'après sa date de dernière modification.
+    """
+    return max(0.0, time.time() - os.stat(path).st_mtime)
+
+
+def is_file_open_elsewhere(path: str) -> bool:
+    """
+    Indique si `path` est actuellement ouvert par un autre processus.
+
+    Sert à détecter un upload SFTP encore en cours (SFTPGo écrit le fichier en
+    place, `upload_mode` 0) avant de le parser. Implémenté par lecture de
+    `/proc/<pid>/fd` : seuls les processus du même utilisateur sont lisibles,
+    ce qui suffit car SFTPGo et le parseur tournent tous deux sous `sftpgo`.
+
+    Retourne False si `/proc` n'est pas disponible (hors Linux) ou si le
+    fichier n'existe pas : dans le doute on ne bloque pas l'ingestion.
+    """
+    try:
+        target = os.path.realpath(path)
+        proc_root = Path("/proc")
+        if not proc_root.is_dir():
+            return False
+        own_pid = str(os.getpid())
+        for pid_dir in proc_root.iterdir():
+            if not pid_dir.name.isdigit() or pid_dir.name == own_pid:
+                continue
+            fd_dir = pid_dir / "fd"
+            try:
+                for fd in fd_dir.iterdir():
+                    try:
+                        if os.readlink(str(fd)) == target:
+                            return True
+                    except OSError:
+                        continue
+            except OSError:
+                # Processus d'un autre utilisateur ou déjà terminé
+                continue
+    except OSError:
+        return False
+    return False

@@ -2,7 +2,7 @@ import os
 import textwrap
 from pathlib import Path
 from datetime import datetime
-from typing import List
+from typing import Any, List
 
 import pandas as pd
 import pytest
@@ -974,3 +974,189 @@ def test_hybrid_v002_with_header_real_file_from_prod():
     assert stats["nb_invalid_values"] == 0
     assert stats["channels"]["M02001315_U1"]["device_type"] == "master"
     assert stats["channels"]["M02001315_S04001486_Ch1"]["device_type"] == "slave"
+
+
+# ---------------------------------------------------------------------------
+# Fichiers en cours d'upload : has_complete_data_block, is_file_open_elsewhere,
+# select_ready_files et intégration dans main()
+# ---------------------------------------------------------------------------
+
+V003_COMPLETE = """
+    START_HEADER
+    {"FileVersion":3,"MasterType":"Tri"}
+    END_HEADER
+    START_DATA
+    02001310\t02001310
+    MV_T302_V003\tPh 1 V
+    15/09/26 12:30:00\t239.94
+    END_DATA
+"""
+
+V003_TRUNCATED = """
+    START_HEADER
+    {"FileVersion":3,"MasterType":"Tri"}
+    END_HEADER
+    START_DATA
+    02001310\t02001310
+    MV_T302_V003\tPh 1 V
+    15/09/26 12:30:00\t239.94
+    15/09/26 12:40:00\t241.
+"""
+
+
+def test_has_complete_data_block(tmp_path):
+    from core import has_complete_data_block
+
+    for name in ("a", "b", "c"):
+        (tmp_path / name).mkdir()
+    complete = write_tmp_tsv(tmp_path / "a", V003_COMPLETE)
+    truncated = write_tmp_tsv(tmp_path / "b", V003_TRUNCATED)
+    v002 = write_tmp_tsv(tmp_path / "c", "02001084\t02001084\nMV_T302_V002\tPh 1 V\n03/08/25 03:20:00\t242.25\n")
+
+    assert has_complete_data_block(str(complete)) is True
+    assert has_complete_data_block(str(truncated)) is False
+    # Sans bloc d'en-tête, pas de marqueur de fin : considéré complet
+    assert has_complete_data_block(str(v002)) is True
+
+
+def test_has_complete_data_block_end_marker_beyond_tail_window(tmp_path):
+    """
+    Le marqueur doit être la dernière ligne non vide, même avec des lignes
+    de données longues : la fenêtre de lecture ne doit pas rater END_DATA.
+    """
+    from core import has_complete_data_block
+
+    rows = "\n".join(f"15/09/26 12:{i:02d}:00\t" + "\t".join(["239.94"] * 200) for i in range(60))
+    content = "START_HEADER\n{}\nEND_HEADER\nSTART_DATA\n02001310\t02001310\nMV_T302_V003\tPh 1 V\n" + rows + "\nEND_DATA\n"
+    f = tmp_path / "big.tsv"
+    f.write_text(content, encoding="utf-8")
+    assert has_complete_data_block(str(f)) is True
+
+
+def test_is_file_open_elsewhere_closed_file_is_false(tmp_path):
+    from fs_utils import is_file_open_elsewhere
+
+    f = tmp_path / "closed.tsv"
+    f.write_text("x", encoding="utf-8")
+    assert is_file_open_elsewhere(str(f)) is False
+
+
+@pytest.mark.skipif(not Path("/proc").is_dir(), reason="nécessite /proc (Linux)")
+def test_is_file_open_elsewhere_detects_writer_process(tmp_path):
+    import subprocess
+    import sys as _sys
+    import time as _time
+
+    from fs_utils import is_file_open_elsewhere
+
+    f = tmp_path / "uploading.tsv"
+    proc = subprocess.Popen(
+        [_sys.executable, "-c",
+         f"import time; fh = open({str(f)!r}, 'w'); print('open', flush=True); time.sleep(30)"],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == b"open"
+        assert is_file_open_elsewhere(str(f)) is True
+    finally:
+        proc.kill()
+        proc.wait()
+    _time.sleep(0.1)
+    assert is_file_open_elsewhere(str(f)) is False
+
+
+def test_select_ready_files_skips_open_and_fresh_incomplete(monkeypatch, tmp_path, caplog):
+    for name in ("a", "b", "c", "d"):
+        (tmp_path / name).mkdir()
+    complete = write_tmp_tsv(tmp_path / "a", V003_COMPLETE)
+    fresh_truncated = write_tmp_tsv(tmp_path / "b", V003_TRUNCATED)
+    old_truncated = write_tmp_tsv(tmp_path / "c", V003_TRUNCATED)
+    open_elsewhere = write_tmp_tsv(tmp_path / "d", V003_COMPLETE)
+
+    monkeypatch.setattr(
+        tsv_parser, "is_file_open_elsewhere", lambda p: p == str(open_elsewhere)
+    )
+    monkeypatch.setattr(
+        tsv_parser, "file_age_seconds", lambda p: 3600.0 if p == str(old_truncated) else 5.0
+    )
+
+    with caplog.at_level("WARNING", logger="tsv_parser"):
+        ready, skipped = tsv_parser.select_ready_files(
+            [str(complete), str(fresh_truncated), str(old_truncated), str(open_elsewhere)],
+            grace_s=600.0,
+        )
+
+    assert ready == [str(complete), str(old_truncated)]
+    skipped_paths = [p for p, _ in skipped]
+    assert skipped_paths == [str(fresh_truncated), str(open_elsewhere)]
+    assert "END_DATA absent" in dict(skipped)[str(fresh_truncated)]
+    assert "ouvert par un autre processus" in dict(skipped)[str(open_elsewhere)]
+    # Le fichier tronqué depuis longtemps est ingéré avec avertissement
+    assert "présumé tronqué à la source" in caplog.text
+
+
+def test_main_leaves_uploading_file_in_place(monkeypatch, tmp_path):
+    """
+    Un fichier encore ouvert par un autre processus ne doit être ni ingéré
+    ni déplacé ; il est compté dans nb_files_skipped du rapport.
+    """
+    import sys as _sys
+
+    base_folder, tsv_file = _make_tsv_tree(tmp_path)
+    client = DummyClient()
+    written: List[Any] = []
+    monkeypatch.setattr(tsv_parser, "write_points", lambda c, b, o, pts: written.extend(pts))
+    monkeypatch.setattr(tsv_parser, "setup_influxdb_client", lambda: (client, "my-org"))
+    monkeypatch.setattr(tsv_parser, "ping_influxdb", lambda c: True)
+    monkeypatch.setattr(tsv_parser, "is_file_open_elsewhere", lambda p: True)
+    monkeypatch.setenv("TSV_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setattr(_sys, "argv", ["tsv_parser.py", "--dataFolder", str(base_folder)])
+
+    tsv_parser.main()
+
+    assert tsv_file.exists()
+    assert not (tsv_file.parent / "parsed").exists()
+    assert not (tsv_file.parent / "error").exists()
+    assert written == []
+    # Aucun fichier prêt : main() sort avant d'écrire un rapport
+    assert not (tmp_path / "reports").exists() or not list((tmp_path / "reports").glob("*.json"))
+
+
+def test_main_reports_skipped_alongside_processed(monkeypatch, tmp_path):
+    """
+    Un fichier prêt est ingéré et déplacé, le fichier en cours d'upload reste
+    en place et figure dans skipped_files du rapport.
+    """
+    import json as _json
+    import sys as _sys
+
+    base_folder, ready_file = _make_tsv_tree(tmp_path)
+    other_dir = base_folder / "company1" / "campaign1" / "02001085"
+    other_dir.mkdir()
+    uploading = write_tmp_tsv(other_dir, V003_TRUNCATED)
+
+    client = DummyClient()
+    monkeypatch.setattr(tsv_parser, "write_points", lambda c, b, o, pts: None)
+    monkeypatch.setattr(tsv_parser, "count_points_for_file", lambda **kw: 1)
+    monkeypatch.setattr(tsv_parser, "setup_influxdb_client", lambda: (client, "my-org"))
+    monkeypatch.setattr(tsv_parser, "ping_influxdb", lambda c: True)
+    monkeypatch.setattr(tsv_parser, "is_file_open_elsewhere", lambda p: False)
+    monkeypatch.setenv("TSV_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setattr(_sys, "argv", ["tsv_parser.py", "--dataFolder", str(base_folder)])
+
+    tsv_parser.main()
+
+    assert (ready_file.parent / "parsed" / ready_file.name).exists()
+    assert uploading.exists()
+    assert not (uploading.parent / "parsed").exists()
+    assert not (uploading.parent / "error").exists()
+
+    reports = list((tmp_path / "reports").glob("*.json"))
+    assert len(reports) == 1
+    report = _json.loads(reports[0].read_text(encoding="utf-8"))
+    assert report["nb_files_total"] == 1
+    assert report["nb_files_success"] == 1
+    assert report["nb_files_skipped"] == 1
+    assert report["skipped_files"][0]["file_path"] == str(uploading)
+    assert "END_DATA absent" in report["skipped_files"][0]["reason"]
